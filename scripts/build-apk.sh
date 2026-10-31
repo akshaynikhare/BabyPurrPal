@@ -9,13 +9,13 @@ npm run build
 # 2. Check if Capacitor is present or install
 if [ ! -d "node_modules/@capacitor/cli" ]; then
   echo "📦 Installing Capacitor dependencies..."
-  npm install --no-save @capacitor/core @capacitor/cli @capacitor/android
+  npm install --no-save --legacy-peer-deps @capacitor/core @capacitor/cli @capacitor/android
 fi
 
 # 3. Initialize Capacitor if android folder doesn't exist
 if [ ! -d "android" ]; then
   echo "📱 Initializing Android platform..."
-  npx cap init "PurrPal" "com.purrpal.babygame" --web-dir=dist
+  npx cap init "BabyPurrPal" "com.babypurrpal.app" --web-dir=dist
   npx cap add android
 fi
 

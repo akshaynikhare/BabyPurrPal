@@ -1,59 +1,70 @@
-name: Build Android APK for Toddlers
+name: Build and Release Android APK
 
 on:
   push:
-    branches: [ main, master ]
-  pull_request:
-    branches: [ main, master ]
+    branches:
+      - main
   workflow_dispatch:
 
+permissions:
+  contents: write # Required to create tags and releases
+
 jobs:
-  build-android:
-    name: Build Android APK
+  release:
+    name: Build and Release APK
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout Repository
+      - name: Checkout source
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Required to fetch all history for changelog generation
 
-      - name: Set up Node.js
+      - name: Bump version and push tag
+        id: tag_version
+        uses: mathieudutour/github-tag-action@v6.2
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          default_bump: patch
+
+      - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
-          cache: 'npm'
+          node-version: '22'
 
-      - name: Set up Java JDK 17
+      - name: Setup Java
         uses: actions/setup-java@v4
         with:
           distribution: 'zulu'
-          java-version: '17'
+          java-version: '21'
 
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Install Project Dependencies
-        run: npm install
+      - name: Install dependencies
+        run: npm install --legacy-peer-deps
 
-      - name: Build Web Application
+      - name: Build Web App
         run: npm run build
 
       - name: Initialize Capacitor Android Container
         run: |
-          npm install --no-save @capacitor/core @capacitor/cli @capacitor/android
-          npx cap init "PurrPal" "com.purrpal.babygame" --web-dir=dist
+          npm install --no-save --legacy-peer-deps @capacitor/core @capacitor/cli @capacitor/android
+          npx cap init "BabyPurrPal" "com.babypurrpal.app" --web-dir=dist
           npx cap add android
           npx cap sync android
 
-      - name: Build Android Debug APK
+      - name: Build APK
         working-directory: android
         run: |
-          chmod +x gradlew
+          chmod +x ./gradlew
           ./gradlew assembleDebug --stacktrace
 
-      - name: Upload APK Artifact
-        uses: actions/upload-artifact@v4
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
         with:
-          name: PurrPal-BabyGame-debug.apk
-          path: android/app/build/outputs/apk/debug/app-debug.apk
-          if-no-files-found: error
-          retention-days: 30
+          tag_name: ${{ steps.tag_version.outputs.new_tag }}
+          name: Release ${{ steps.tag_version.outputs.new_tag }}
+          body: ${{ steps.tag_version.outputs.changelog }}
+          files: android/app/build/outputs/apk/debug/app-debug.apk
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
