@@ -1,0 +1,9 @@
+{
+  "_comment": "Accepted debt (install). Burn it down; never add to it. Regenerate: node .actionplan/scripts/gate-lib.cjs --update",
+  "gate": "no-plan-refs",
+  "mode": "ratchet",
+  "recorded": "2026-10-31",
+  "plan": "install",
+  "count": 0,
+  "items": []
+}

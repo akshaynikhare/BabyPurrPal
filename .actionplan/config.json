@@ -1,0 +1,24 @@
+{
+  "code": "PP",
+  "name": "applet",
+  "detected": "2026-10-31",
+  "packageManager": "bun",
+  "apps": [],
+  "commands": {
+    "dev": "bun run dev",
+    "test": "echo 'TODO(verify): test command'; exit 1",
+    "lint": "bun run lint",
+    "typecheck": "echo 'TODO(verify): typecheck command'; exit 1"
+  },
+  "ports": {},
+  "srcDirs": [
+    "src"
+  ],
+  "lanes": {
+    "orchestrator": "session",
+    "complex": "opus",
+    "bulk": "sonnet"
+  },
+  "lockStaleHours": 8,
+  "qaMaxRounds": 3
+}
