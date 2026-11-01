@@ -1,6 +1,0 @@
-{
-  "name": "PurrPal - Talking Cat Baby Game",
-  "description": "An ultra-clean, offline-first reinforcement learning game for 1-year-old babies featuring a high-contrast talking cat, multi-zone touch interaction, soothing audio, and Talking Tom voice mimicry.",
-  "requestFramePermissions": ["microphone"],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
-}

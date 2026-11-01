@@ -5,10 +5,10 @@
   "packageManager": "bun",
   "apps": [],
   "commands": {
-    "dev": "bun run dev",
-    "test": "echo 'TODO(verify): test command'; exit 1",
-    "lint": "bun run lint",
-    "typecheck": "echo 'TODO(verify): typecheck command'; exit 1"
+    "dev": "make run",
+    "test": "make test",
+    "lint": "make import",
+    "typecheck": "make import"
   },
   "ports": {},
   "srcDirs": [

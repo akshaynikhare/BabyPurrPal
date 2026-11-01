@@ -1,127 +1,39 @@
-# PurrPal - Infant Talking Pets & Reinforcement Learning Game
+# BabyPurrPal
 
-[![ActionPlan Kit](https://img.shields.io/badge/ActionPlan%20Kit-Enabled-blue.svg)](https://github.com/akshaynikhare/action-plan-kit)
-[![Platform](https://img.shields.io/badge/Platform-Web%20%7C%20Android%20APK-emerald.svg)](#-building-the-android-apk)
-[![License](https://img.shields.io/badge/License-MIT-amber.svg)](LICENSE)
+An ad-free, offline talking-pet game for babies and toddlers. An original cat, dog or bunny lives in a cozy pastel room. It listens to your baby and repeats their coos and babble in a cute, higher voice. Tapping the pet's ears, cheeks, mouth, belly or paws gets a reaction, and each pet has three toys.
 
-An ultra-clean, minimalist, offline-first reinforcement learning game designed specifically for infants and toddlers (ages 6 months to 2.5 years).
+Built with **Godot 4.7** (GDScript, 3D, Mobile renderer): toon-shaded pets with warm-brown outlines. Portrait only, 60 fps cap.
 
-Featuring 3 adorable 2D cartoon companions: **Kitty Cat**, **Puppy Dog**, and **Bunny Rabbit**, with real-time Talking Tom voice mimicry, multi-zone sensory touch interactions, procedural Web Audio synthesis, Web Vibration haptics, circadian lighting cycles, and natural gesture-driven navigation.
+## How it plays
+- **Talk-back:** the pet calibrates to the room's noise, perks its ears and nods while it listens, then repeats the sound pitch-shifted (higher, not sped up) with its mouth in sync. It never repeats its own sounds.
+- **Touch:** each body part has its own reactions, and a reaction never plays twice in a row. Tapping the background plays chimes.
+- **Gestures:** swipe to switch pets; pinch, or press the zoom button, for a face close-up.
+- **Time of day:** the room follows the clock (sunrise, day, sunset, night). The sun/moon button changes it by hand.
 
----
+## For parents
+- **Settings:** hold the gear for 3 seconds. Inside: soothing lullaby, voice pitch (1.2×–1.8×), talking pet on/off, Test Voice.
+- **Microphone privacy:**
+  - **Local only:** audio is processed on the phone. Nothing is recorded to storage or sent anywhere.
+  - **When the mic is closed:** whenever the app is in the background, and when the talking pet is off.
+  - **During the lullaby:** the pet keeps listening. The music turns down while it listens and talks.
+- **Network:** no ads and no network use.
 
-## 📚 Documentation & Specifications
-
-| Document | Purpose |
-|---|---|
-| **[Game Design Document (GDD)](docs/GDD.md)** | Infant operant conditioning model, sensory reward loops, audio synthesis graph, and touch matrix |
-| **[Design System & Visual Spec](docs/DESIGN_SYSTEM.md)** | Color palettes, SVG geometric anatomy, eye specular formulas, and motion timing curves |
-| **[AI Agent Operating Guide](AGENT.md)** | Technical invariants, coding standards, Web Audio safety, and verification rules for AI agents |
-| **[ActionPlan Kit Instructions](AGENTS.md)** | Spec-driven development sprint commands (`/ap:new`, `/ap:ask`, `/ap:run`, `/ap:status`) |
-| **[Engineering Standard](docs/_workflow/ENGINEERING_STANDARD.md)** | Code hygiene, testing rules, and release gates |
-
----
-
-## 🌟 Key Features
-
-### 1. Talking Tom Voice Mimicry (100% Offline)
-- Built-in Voice Activity Detection (VAD) listening to the baby's coos and babbles via the Web Audio API.
-- Repeats the baby's speech pitched up like Talking Tom (~1.45x) with dynamic mouth-sync matching vocal amplitude.
-- No network requests, zero cloud dependencies — 100% safe, private, and works offline in airplane mode.
-
-### 2. Natural Gesture-Driven Navigation (Distraction-Free)
-- **Natural Swipe / Drag Gestures**: Babies simply swipe left or right across the screen to transition between the pets.
-- **Walk-in Animation**: When switching, the next pet slowly waddles onto the screen (~1.1s) with stepping feet and pitter-patter footsteps before greeting the baby.
-- **No Intrusive Buttons**: Side arrow buttons have been removed from the main stage, leaving an ultra-clean, un-cluttered viewport.
-
-### 3. Tactile & Multi-Zone Touch Reinforcement
-- **Ears**: Purring / audio ripple / heart particles.
-- **Cheeks**: Blushing cheek glow / silver twinkle chimes.
-- **Mouth**: Talking Tom mimicry / toy feeding / crunchy bites.
-- **Belly**: Tickle wobble giggles / floating soap bubbles.
-- **Paws**: High-fives forward / wooden marimba chime taps.
-- **Canvas Touches**: Generates harmonious notes from the C-Major Pentatonic Scale ($C_4, D_4, E_4, G_4, A_4, C_5$).
-
-### 4. Interactive Pinch-to-Zoom on Face
-- Two-finger pinch gesture smoothly zooms into a close-up of the pet's face (1.85x scale centered at `50% 36%`), allowing toddlers to inspect fluffy fur tufts, twitching noses, and shiny gradient eyes.
-- Includes a 1-tap zoom toggle button for accessibility.
-
-### 5. Time-Aware Circadian Lighting
-- Background atmosphere dynamically shifts through **Sunrise**, **Daylight**, **Sunset**, and starry **Night** modes to create a calming, natural environment.
-
-### 6. Toddler-Proof Parental Lock (Hold 3 Seconds)
-- Discreet top gear icon requires holding for 3 seconds to access:
-  - Soothing background pentatonic lullaby toggle & volume.
-  - Voice pitch modifier (1.2x to 1.8x).
-  - Microphone sensitivity adjustments.
-
----
-
-## 🚀 Quick Start & Development
-
-### Prerequisites
-- Node.js 22 or 24
-- npm or pnpm
-
-### Running Locally
+## Develop
 ```bash
-# Clone the repository
-git clone https://github.com/akshaynikhare/purrpal-baby-game.git
-cd purrpal-baby-game
-
-# Install dependencies
-npm install
-
-# Start development server on port 3000
-npm run dev
+make run      # open in Godot
+make test     # headless logic tests (talk-back, gestures, UI logic)
+make apk      # debug APK → build/BabyPurrPal.apk
+make install  # adb install the debug APK
 ```
-Open [http://localhost:3000](http://localhost:3000) in your browser.
+- **Architecture, runtime audio buses and agent rules:** [docs/GODOT_ARCHITECTURE.md](docs/GODOT_ARCHITECTURE.md).
+- **Behaviour spec:** [docs/REWRITE_SPEC.md](docs/REWRITE_SPEC.md).
+- **Pets:** built by a Blender script, `tools/blender/build_pets.py` (Blender 5.2, headless). Regenerate with:
+  ```
+  /Applications/Blender.app/Contents/MacOS/Blender -b --factory-startup -P tools/blender/build_pets.py -- --pet all
+  ```
+- **Sounds:** rendered by `tools/audio/render_sfx.py`.
 
-### ActionPlan Kit Commands
-```bash
-# Run kit verification gates
-make check
-# or directly:
-node .actionplan/scripts/check.cjs
+## Release
+Every push to `main` runs CI: it bumps a tag, runs the tests, exports a signed APK and publishes a GitHub Release. Signing uses the `KEYSTORE_B64`, `KEY_ALIAS` and `KEY_PASS` repo secrets; without them CI publishes a debug-signed build.
 
-# View sprint board status
-make status
-```
-
----
-
-## 📱 Building the Android APK
-
-This repository is pre-configured with two ways to generate your standalone Android APK:
-
-### Method 1: Automatic GitHub Actions (Recommended)
-1. Push your repository to GitHub.
-2. Navigate to the **Actions** tab.
-3. Select **"Build Android APK for Toddlers"** and click **Run workflow**.
-4. Download the compiled `PurrPal-BabyGame-debug.apk` directly from the workflow **Artifacts** section!
-
-### Method 2: Local APK Build Script
-With Android Studio & SDK installed locally:
-```bash
-npm run build:apk
-```
-The debug APK is generated at:
-`android/app/build/outputs/apk/debug/app-debug.apk`
-
----
-
-## 🛠️ Tech Stack
-
-- **Framework**: React 19 + TypeScript + Vite
-- **Styling**: Tailwind CSS v4
-- **Animations**: Motion (`motion/react` / `framer-motion`)
-- **Audio Engine**: Web Audio API (procedural synthesis, VAD analyser, buffer pitch shifting)
-- **Haptics**: Web Vibration API
-- **Packaging**: Vite PWA (`vite-plugin-pwa`) / Capacitor Android (`@capacitor/android`)
-- **Spec-Driven Kit**: [ActionPlan Kit](https://github.com/akshaynikhare/action-plan-kit)
-
----
-
-## 📄 License
-
-MIT License. Designed with care for infants and parents.
+The previous React/Capacitor prototype is in git history (v0.0.1).

@@ -13,6 +13,7 @@ jobs:
   release:
     name: Build and Release APK
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - name: Checkout source
         uses: actions/checkout@v4
@@ -24,37 +25,99 @@ jobs:
         uses: mathieudutour/github-tag-action@v6.2
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          default_bump: patch
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '22'
+          default_bump: patch # Automatically bumps version (e.g., 1.0.0 -> 1.0.1)
 
       - name: Setup Java
         uses: actions/setup-java@v4
         with:
-          distribution: 'zulu'
-          java-version: '21'
+          distribution: temurin
+          java-version: '17'
 
-      - name: Install dependencies
-        run: npm install --legacy-peer-deps
+      # android-actions/setup-android is broken on current runners; the
+      # ubuntu image already ships the Android SDK at $ANDROID_HOME.
+      - name: Setup Godot
+        uses: chickensoft-games/setup-godot@v2
+        with:
+          version: 4.7.2
+          use-dotnet: false
+          include-templates: true
 
-      - name: Build Web App
-        run: npm run build
-
-      - name: Initialize Capacitor Android Container
+      - name: Configure Godot Android export
         run: |
-          npm install --no-save --legacy-peer-deps @capacitor/core @capacitor/cli @capacitor/android
-          npx cap init "BabyPurrPal" "com.babypurrpal.app" --web-dir=dist
-          npx cap add android
-          npx cap sync android
+          set -euo pipefail
+          test -d "$ANDROID_HOME" || { echo "::error::ANDROID_HOME not found"; exit 1; }
+          echo "Android SDK build-tools: $(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -printf '%f ')"
+          echo "Android SDK platforms:   $(find "$ANDROID_HOME/platforms" -mindepth 1 -maxdepth 1 -printf '%f ')"
 
-      - name: Build APK
-        working-directory: android
+          keytool -genkeypair -keystore "$HOME/debug.keystore" \
+            -storepass android -keypass android -alias androiddebugkey \
+            -keyalg RSA -keysize 2048 -validity 10000 \
+            -dname "CN=Android Debug,O=Android,C=US"
+
+          mkdir -p "$HOME/.config/godot"
+          cat > "$HOME/.config/godot/editor_settings-4.7.tres" <<TRES
+          [gd_resource type="EditorSettings" format=3]
+
+          [resource]
+          export/android/android_sdk_path = "$ANDROID_HOME"
+          export/android/java_sdk_path = "$JAVA_HOME"
+          export/android/debug_keystore = "$HOME/debug.keystore"
+          export/android/debug_keystore_user = "androiddebugkey"
+          export/android/debug_keystore_pass = "android"
+          TRES
+
+      - name: Set version from tag
+        env:
+          VERSION_NAME: ${{ steps.tag_version.outputs.new_version }}
+          VERSION_CODE: ${{ github.run_number }}
         run: |
-          chmod +x ./gradlew
-          ./gradlew assembleDebug --stacktrace
+          set -euo pipefail
+          test -n "$VERSION_NAME" || { echo "::error::no new_version from tag step"; exit 1; }
+          sed -i -E "s/^version\/code=.*/version\/code=${VERSION_CODE}/" export_presets.cfg
+          sed -i -E "s/^version\/name=.*/version\/name=\"${VERSION_NAME}\"/" export_presets.cfg
+          grep -E '^version/(code|name)=' export_presets.cfg
+
+      - name: Import project
+        run: godot --headless --path . --import
+
+      - name: Run tests
+        run: godot --headless --path . -s tests/run_tests.gd
+
+      - name: Export APK
+        env:
+          KEYSTORE_B64: ${{ secrets.KEYSTORE_B64 }}
+          GODOT_ANDROID_KEYSTORE_RELEASE_USER: ${{ secrets.KEY_ALIAS }}
+          GODOT_ANDROID_KEYSTORE_RELEASE_PASSWORD: ${{ secrets.KEY_PASS }}
+        run: |
+          set -uo pipefail
+          APK=build/BabyPurrPal.apk
+          LOG="$RUNNER_TEMP/export.log"
+          mkdir -p build
+          rm -f "$APK"
+
+          if [ -n "$KEYSTORE_B64" ]; then
+            echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/release.keystore"
+            export GODOT_ANDROID_KEYSTORE_RELEASE_PATH="$RUNNER_TEMP/release.keystore"
+            MODE=--export-release
+          else
+            echo "::warning::release keystore secret missing — debug-signed build"
+            MODE=--export-debug
+          fi
+
+          godot --headless --path . "$MODE" "Android" "$APK" 2>&1 | tee "$LOG"
+          status=${PIPESTATUS[0]}
+
+          # Godot can print export errors and still exit 0, so check the artifacts too.
+          if [ "$status" -ne 0 ]; then
+            echo "::error::godot export exited with status $status"; exit 1
+          fi
+          if grep -q "ERROR:" "$LOG"; then
+            echo "::error::godot export log contains ERROR lines"; grep "ERROR:" "$LOG"; exit 1
+          fi
+          if [ ! -s "$APK" ]; then
+            echo "::error::$APK was not produced"; exit 1
+          fi
+          ls -l "$APK"
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
@@ -62,6 +125,6 @@ jobs:
           tag_name: ${{ steps.tag_version.outputs.new_tag }}
           name: Release ${{ steps.tag_version.outputs.new_tag }}
           body: ${{ steps.tag_version.outputs.changelog }}
-          files: android/app/build/outputs/apk/debug/app-debug.apk
+          files: build/BabyPurrPal.apk
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

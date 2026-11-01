@@ -6,3 +6,13 @@ coverage/
 *.log
 .env*
 !.env.example
+
+# Godot
+.godot/
+/build/
+*.apk
+*.aab
+
+# Review artifacts (regenerable)
+tools/screens/
+tools/blender/previews/
