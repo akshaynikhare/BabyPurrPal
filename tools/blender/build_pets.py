@@ -956,6 +956,10 @@ def build_geometry(S):
             mats.append("paw" if S["socks"] and tt > 0.74 else "body")
         body.add(av, af, mats, {f"arm_{sfx}": 1.0})
         bones[f"arm_{sfx}"] = (sh, paw, "chest")
+        if sfx == "R":
+            # where props held in the paws sit (GDScript attaches them to this bone)
+            d = (paw - sh).normalized()
+            bones["hold"] = (paw - d * 0.02, paw + d * 0.01, "arm_R")
 
         fo = S["foot"]
         fc = Vector((sx * fo["c"][0], fo["c"][1], fo["c"][2]))
@@ -1228,6 +1232,9 @@ def make_armature(name, bones):
             eb.head, eb.tail = Vector(h), Vector(t)
             eb.roll = 0.0
             eb.use_deform = True
+            if nm == "hold":
+                # props must not stretch when the arm does
+                eb.inherit_scale = "NONE"
             if parent:
                 eb.parent = done[parent]
                 eb.use_connect = False
@@ -1246,6 +1253,34 @@ class Animator:
         self.M = {b.name: b.matrix_local.to_3x3() for b in arm.data.bones}
         self.dir = {b.name: (b.tail_local - b.head_local).normalized() for b in arm.data.bones}
         arm.animation_data_create()
+
+    def resolve_at(self, pose):
+        """Specs with "at" (armature-space point) get the rotation and stretch that put the
+        bone's tail there, given the parents' poses in the same key (unkeyed bones at rest)."""
+        if not any("at" in sp for sp in pose.values()):
+            return pose
+        pose = dict(pose)
+        posed = {}
+        for b in self.arm.data.bones:
+            sp = pose.get(b.name, {})
+            rest = b.matrix_local
+            if b.parent:
+                base = posed[b.parent.name] @ b.parent.matrix_local.inverted() @ rest
+            else:
+                base = rest.copy()
+            if "at" in sp:
+                d = base.inverted().to_3x3() @ (Vector(sp["at"]) - base.translation)
+                k = d.length / b.length
+                sp = {"q": Vector((0, 1, 0)).rotation_difference(d.normalized()), "s": (1, k, 1)}
+                pose[b.name] = sp
+                basis = sp["q"].to_matrix().to_4x4() @ Matrix.Diagonal((1, k, 1, 1))
+            else:
+                q, loc, sc = self.basis(b.name, sp.get("r"), sp.get("l"), sp.get("s"), sp.get("a"))
+                basis = Matrix.Translation(loc or Vector()) @ (q or Euler((0, 0, 0)).to_quaternion()).to_matrix().to_4x4()
+                if sc:
+                    basis = basis @ Matrix.Diagonal((sc[0], sc[1], sc[2], 1))
+            posed[b.name] = base @ basis
+        return pose
 
     def basis(self, bone, r=None, l=None, s=None, a=None):
         """r: armature-space euler (deg); a: armature-space direction to aim the bone at."""
@@ -1275,7 +1310,7 @@ class Animator:
             timeline[end] = dict(timeline.get(0.0, {}))
         last_q = {}
         for f in sorted(timeline):
-            pose = timeline[f]
+            pose = self.resolve_at(timeline[f])
             edge = f in (0.0, end)
             for nm in names:
                 pb = arm.pose.bones[nm]
@@ -1284,6 +1319,7 @@ class Animator:
                     continue
                 spec = spec or {}
                 q, loc, s = self.basis(nm, spec.get("r"), spec.get("l"), spec.get("s"), spec.get("a"))
+                q = spec.get("q", q)
                 pb.rotation_mode = "QUATERNION"
                 if q is not None or edge:
                     q = q if q is not None else Euler((0, 0, 0)).to_quaternion()
@@ -1516,6 +1552,7 @@ def build_actions(arm, S, head=None):
     ])
 
     build_new_actions(A, S, bones, tails, ears, tail, perk, droop)
+    build_toy_actions(A, S, tails, ears, tail, perk, droop)
 
 
 def build_new_actions(A, S, bones, tails, ears, tail, perk, droop):
@@ -1766,6 +1803,248 @@ def build_new_actions(A, S, bones, tails, ears, tail, perk, droop):
         (0.75, P({"head": {"r": (0, 0, 3)}, "chest": {"r": (0, 0, 0)}}, ears_same((0, -2, 0)))),
     ], face=[(0.34, {"nose_twitch": 1.0}), (0.4, {"nose_twitch": 0.0}), (0.46, {"nose_twitch": 1.0}),
              (0.52, {"nose_twitch": 0.0})])
+
+
+# Seated toy play: sit_down ends on SIT, which every sit_* clip starts (and ends) on;
+# lie_down ends on LIE, which lie_play loops on and get_up starts from.
+LAP = Vector((0, -0.2, 0.26))         # paws together in the lap (armature space)
+EAT = Vector((0, -0.25, 0.43))        # paws holding food up under the mouth
+SIP = Vector((0, -0.24, 0.46))        # paws holding a cup at the mouth
+
+
+def paws(p):
+    """Both front paws meet at p; the right one carries the hold bone."""
+    return {"arm_R": {"at": tuple(p + Vector((-0.022, 0, 0)))},
+            "arm_L": {"at": tuple(p + Vector((0.022, 0, 0)))}}
+
+
+def build_toy_actions(A, S, tails, ears, tail, perk, droop):
+    dog = S["ears"] == "dog"
+    bunny = S["ears"] == "bunny"
+    back = (24, 0, 0) if dog else (-24, 8, 0)
+    flat = (30, 0, 0) if dog else (-34, 14, 0)
+
+    def eyes(v):
+        return {"blink_L": v, "blink_R": v}
+
+    def ears_same(r):
+        d = {"ear_L": {"r": r}, "ear_R": {"r": r}}
+        if bunny:
+            t = tuple(x * 0.6 for x in r)
+            d.update({"ear_L_tip": {"r": t}, "ear_R_tip": {"r": t}})
+        return d
+
+    def sit(*extra, hold=LAP, head=(4, 0, 0)):
+        return P({"root": {"r": (-3, 0, 0), "l": (0, 0.01, -0.028)}, "spine": {"s": sq(1.04, 0.95)},
+                  "chest": {"r": (-2, 0, 0)}, "head": {"r": head}},
+                 sym("leg", r=(-72, 0, 0)), tail(-10, 10), ears((0, 0, 0)), paws(hold), *extra)
+
+    SIT = sit()
+
+    # excited: two bouncy hops with a half spin there and back, ears up, tail going
+    A.action("excited", 1.2, [
+        (0.1, P({"spine": {"s": sq(1.12, 0.86)}, "head": {"r": (6, 0, 0)}}, ears((0, 0, 0)))),
+        (0.26, P({"root": {"l": (0, 0, 0.11), "r": (0, 0, 28)}, "spine": {"s": sq(0.92, 1.1)},
+                  "head": {"r": (-8, 0, 0)}}, sym("arm", a=(0.8, -0.3, 0.45)), ears(perk), tail(30),
+                 sym("leg", r=(18, 0, 0)))),
+        (0.42, P({"root": {"l": (0, 0, 0), "r": (0, 0, 20)}, "spine": {"s": sq(1.12, 0.87)},
+                  "head": {"r": (6, 0, 0)}}, sym("arm", r=(0, -6, 0)), tail(-30), sym("leg", r=(0, 0, 0)))),
+        (0.6, P({"root": {"l": (0, 0, 0.13), "r": (0, 0, -6)}, "spine": {"s": sq(0.92, 1.1)},
+                 "head": {"r": (-8, 0, 0)}}, sym("arm", a=(0.8, -0.3, 0.45)), ears(perk), tail(30),
+                sym("leg", r=(18, 0, 0)))),
+        (0.76, P({"root": {"l": (0, 0, 0), "r": (0, 0, 2)}, "spine": {"s": sq(1.12, 0.87)},
+                  "head": {"r": (6, 0, 0)}}, sym("arm", r=(0, -6, 0)), tail(-30), sym("leg", r=(0, 0, 0)))),
+        (0.88, P({"spine": {"r": (0, 0, 8), "s": sq(0.98, 1.03)}, "head": {"r": (-2, 0, -4)}}, tail(25))),
+        (0.98, P({"spine": {"r": (0, 0, -6), "s": sq(1.01, 0.99)}, "head": {"r": (0, 0, 3)}}, tail(-20))),
+        (1.08, P({"spine": {"r": (0, 0, 2), "s": sq(1, 1)}, "root": {"r": (0, 0, 0)}, "head": {"r": (0, 0, 0)}},
+                 sym("arm", r=(0, 0, 0)), tail(8), ears((0, 0, 0)))),
+    ], face=[(0.1, {"smile": 1.0, **eyes(0.3)}), (1.0, {"smile": 0.8, **eyes(0.2)})])
+
+    # sit_down / sit_idle / stand_up
+    A.action("sit_down", 0.7, [
+        (0.12, P({"spine": {"s": sq(0.96, 1.05)}, "head": {"r": (-4, 0, 0)}}, ears(perk))),
+        (0.45, P(SIT, {"root": {"r": (-5, 0, 0), "l": (0, 0.01, -0.036)}, "spine": {"s": sq(1.08, 0.91)},
+                       "head": {"r": (8, 0, 0)}})),
+        (0.58, P(SIT, {"root": {"r": (-2, 0, 0), "l": (0, 0.01, -0.026)}, "spine": {"s": sq(1.03, 0.96)}})),
+        (0.7, SIT),
+    ])
+    A.action("sit_idle", 2.0, [
+        (0.0, SIT),
+        (1.0, sit({"chest": {"r": (-2, 0, 0), "s": sq(1.03, 1.015)}}, ears((-3, 3, 0)), tail(-4, 14),
+                  head=(2, 2, 0))),
+        (0.5, P(tail(-14, 10))),
+        (1.5, P(tail(-6, 12))),
+    ], loop=True)
+    A.action("stand_up", 0.7, [
+        (0.0, SIT),
+        (0.16, P(SIT, {"root": {"r": (4, 0, 0), "l": (0, 0, -0.03)}, "chest": {"r": (6, 0, 0)},
+                       "head": {"r": (6, 0, 0)}})),
+        (0.38, P({"root": {"r": (-2, 0, 0), "l": (0, 0, 0.025)}, "spine": {"s": sq(0.94, 1.07)},
+                  "chest": {"r": (0, 0, 0)}, "head": {"r": (-4, 0, 0)}},
+                 sym("leg", r=(8, 0, 0)), sym("arm", r=(0, -6, 0), s=(1, 1, 1)), tail(0), ears(perk))),
+        (0.52, P({"root": {"r": (1, 0, 0), "l": (0, 0, 0)}, "spine": {"s": sq(1.05, 0.95)}, "head": {"r": (2, 0, 0)}},
+                 sym("leg", r=(0, 0, 0)), sym("arm", r=(0, 1, 0)))),
+        (0.62, P({"root": {"r": (0, 0, 0)}, "spine": {"s": sq(0.99, 1.01)}}, ears((0, 0, 0)))),
+    ])
+
+    # sit_hold_eat: raise the food to the mouth, three chews with head bobs, back to the lap
+    he = [(0.0, SIT), (0.16, sit(hold=EAT, head=(16, 0, 0)))]
+    hf = [(0.08, {"smile": 0.6, **eyes(0.3)})]
+    for i in range(3):
+        t = 0.24 + i * 0.25
+        k = 1 if i % 2 == 0 else -1
+        he += [(t, sit(hold=EAT + Vector((0, 0, 0.006)), head=(11, 0, 3 * k))),
+               (t + 0.12, sit(hold=EAT, head=(18, 0, 2 * k)))]
+        hf += [(t, {"jaw_open": 0.45}), (t + 0.12, {"jaw_open": 0.04})]
+    he += [(1.06, sit(hold=EAT, head=(12, 0, 0))), (1.2, SIT)]
+    hf += [(1.05, {"jaw_open": 0.0, "smile": 0.5, **eyes(0.2)})]
+    A.action("sit_hold_eat", 1.2, he, face=hf)
+
+    # sit_hold_drink: cup from the lap to the mouth, head tips back, three gulps, cup down
+    hd = [(0.0, SIT), (0.5, sit(hold=SIP, head=(-4, 0, 0))), (0.6, sit(hold=SIP, head=(-9, 0, 0)))]
+    df = [(0.4, {"jaw_open": 0.15})]
+    for t in (0.75, 1.15, 1.55):
+        hd += [(t, sit(hold=SIP, head=(-5, 0, 0))), (t + 0.16, sit(hold=SIP, head=(-10, 0, 0)))]
+        df += [(t, {"jaw_open": 0.32}), (t + 0.16, {"jaw_open": 0.05})]
+    hd += [(1.9, sit(hold=SIP, head=(-6, 0, 0))), (2.25, sit(hold=LAP + Vector((0, 0, 0.01)), head=(6, 0, 0))),
+           (2.4, SIT)]
+    df += [(1.9, {"jaw_open": 0.0, "smile": 0.7, **eyes(0.4)}), (2.3, {"smile": 0.4, **eyes(0.0)})]
+    A.action("sit_hold_drink", 2.4, hd, face=df)
+
+    # sit_lap: lean down to a floor bowl, four laps, back up
+    low = {"spine": {"r": (14, 0, 0), "s": sq(1.06, 0.93)}, "chest": {"r": (24, 0, 0)}}
+    sl = [(0.0, SIT), (0.15, sit(head=(-4, 0, 0))),
+          (0.5, sit(low, {"head": {"r": (34, 0, 0)}}, hold=LAP + Vector((0, -0.03, -0.05)))),
+          (0.62, sit(low, {"head": {"r": (27, 0, 0)}}, hold=LAP + Vector((0, -0.03, -0.05))))]
+    lf = []
+    for i in range(4):
+        t = 0.72 + i * 0.24
+        sl += [(t, sit(low, {"head": {"r": (34, 0, 0)}}, hold=LAP + Vector((0, -0.03, -0.05)))),
+               (t + 0.12, sit(low, {"head": {"r": (27, 0, 0)}}, hold=LAP + Vector((0, -0.03, -0.05))))]
+        lf += [(t, {"jaw_open": 0.14}), (t + 0.12, {"jaw_open": 0.02})]
+    sl += [(1.8, sit(head=(-5, 0, 0))), (2.0, SIT)]
+    lf += [(1.8, {"jaw_open": 0.0, "smile": 0.5}), (1.95, {"smile": 0.0})]
+    A.action("sit_lap", 2.0, sl, face=lf)
+
+    # sit_bat: one paw swipes in at a floor toy, body leans away, head follows
+    for sfx, m in (("L", 1), ("R", -1)):
+        arm_b, other = f"arm_{sfx}", f"arm_{'R' if sfx == 'L' else 'L'}"
+        out = Vector((m * 0.2, -0.17, 0.2))
+        inn = Vector((-m * 0.02, -0.27, 0.13))
+        A.action(f"sit_bat_{sfx}", 0.6, [
+            (0.0, SIT),
+            (0.1, sit({arm_b: {"at": tuple(out)}, "chest": {"r": (-2, m * 4, m * 6)}, "head": {"r": (10, m * 4, m * 10)}})),
+            (0.22, sit({arm_b: {"at": tuple(inn)}, "chest": {"r": (8, -m * 6, -m * 10)},
+                        "head": {"r": (16, -m * 3, -m * 6)}, "root": {"r": (-3, -m * 5, 0), "l": (0, 0.01, -0.028)}})),
+            (0.31, sit({arm_b: {"at": tuple(inn + Vector((-m * 0.04, 0, 0.01)))}, "head": {"r": (14, -m * 3, -m * 10)}})),
+            (0.45, sit({"head": {"r": (2, 0, 0)}})),
+            (0.6, SIT),
+        ], face=[(0.2, {"smile": 0.6}), (0.5, {"smile": 0.2})])
+
+    # lying on the back: lie_down from standing, lie_play loop, get_up back to rest
+    def lie(*extra, arms=((0.35, -0.9, 0.1), (0.35, -0.9, 0.1)), head=(36, 0, 0)):
+        aL, aR = arms
+        return P({"root": {"r": (-80, 0, 0), "l": (0, 0.02, 0.175)}, "spine": {"s": sq(1.04, 0.97)},
+                  "head": {"r": head}, "arm_L": {"a": aL}, "arm_R": {"a": (-aR[0], aR[1], aR[2])}},
+                 sym("leg", r=(-50, 0, 0)), {"tail": {"r": (75, 0, 0)}}, ears(back), *extra)
+
+    LIE = lie()
+    A.action("lie_down", 0.8, [
+        (0.14, P({"spine": {"s": sq(1.1, 0.88)}, "head": {"r": (8, 0, 0)}, "root": {"l": (0, 0, -0.01)}})),
+        (0.42, P({"root": {"r": (-50, 0, 0), "l": (0, 0.02, 0.1)}, "spine": {"s": sq(0.96, 1.05)},
+                  "head": {"r": (20, 0, 0)}}, sym("leg", r=(-30, 0, 0)), sym("arm", a=(0.6, -0.6, 0.4)))),
+        (0.62, lie({"root": {"r": (-86, 0, 0), "l": (0, 0.02, 0.17)}, "spine": {"s": sq(1.1, 0.9)}},
+                   head=(42, 0, 0))),
+        (0.8, LIE),
+    ], face=[(0.5, {"smile": 0.8, "jaw_open": 0.2}), (0.75, {"jaw_open": 0.0})])
+    lp = [(0.0, LIE)]
+    for i in range(4):
+        k = 1 if i % 2 == 0 else -1
+        t = 0.2 + i * 0.4
+        lp.append((t, lie({"root": {"r": (-80, 3 * k, 6 * k), "l": (0, 0.02, 0.175)},
+                           "leg_L": {"r": (-62 if k > 0 else -38, 0, 0)}, "leg_R": {"r": (-38 if k > 0 else -62, 0, 0)}},
+                          arms=((0.2, -0.5, 0.85), (0.4, -0.85, 0.2)) if k > 0 else ((0.4, -0.85, 0.2), (0.2, -0.5, 0.85)),
+                          head=(30, 0, 4 * k))))
+    A.action("lie_play", 1.6, lp, loop=True,
+             face=[(0.1, {"smile": 0.9, **eyes(0.2)}), (0.8, {"smile": 1.0, "jaw_open": 0.3}),
+                   (1.0, {"jaw_open": 0.05}), (1.5, {"smile": 0.9, **eyes(0.2)})])
+    A.action("get_up", 0.8, [
+        (0.0, LIE),
+        (0.12, lie({"root": {"r": (-84, 0, 0), "l": (0, 0.02, 0.175)}}, head=(46, 0, 0))),
+        (0.38, P({"root": {"r": (-30, 0, 0), "l": (0, 0.01, 0.07)}, "spine": {"s": sq(1.06, 0.95)},
+                  "head": {"r": (14, 0, 0)}}, sym("leg", r=(-20, 0, 0)), sym("arm", a=(0.6, -0.6, -0.4)), tail(0),
+                 ears(droop))),
+        (0.55, P({"root": {"r": (6, 0, 0), "l": (0, 0, 0.02)}, "spine": {"s": sq(0.95, 1.06)}, "head": {"r": (-6, 0, 0)}},
+                 sym("leg", r=(4, 0, 0)), sym("arm", r=(0, -5, 0)), ears(perk))),
+        (0.68, P({"root": {"r": (-1, 0, 0), "l": (0, 0, 0)}, "spine": {"s": sq(1.04, 0.96)}, "head": {"r": (2, 0, 0)}},
+                 sym("leg", r=(0, 0, 0)), sym("arm", r=(0, 1, 0)), ears((0, 0, 0)))),
+    ])
+
+    # laugh: head back, three belly shakes with paws on the belly, ears flop, mouth open
+    belly = Vector((0, -0.19, 0.24))
+    la = [(0.1, P({"head": {"r": (6, 0, 0)}, "spine": {"s": sq(1.05, 0.95)}}))]
+    lf = [(0.1, {"smile": 1.0, "jaw_open": 0.3, **eyes(0.7)})]
+    for i in range(3):
+        t = 0.28 + i * 0.25
+        la += [(t, P({"head": {"r": (-16, 0, 4)}, "chest": {"r": (-6, 0, 0), "s": sq(1.05, 0.95)},
+                      "spine": {"s": sq(1.06, 0.94)}}, paws(belly), ears(droop))),
+               (t + 0.12, P({"head": {"r": (-10, 0, -3)}, "chest": {"r": (-3, 0, 0), "s": sq(0.97, 1.04)},
+                             "spine": {"s": sq(0.98, 1.03)}}, paws(belly + Vector((0, 0, 0.012))), ears((0, 0, 0))))]
+        lf += [(t, {"jaw_open": 0.75}), (t + 0.12, {"jaw_open": 0.35})]
+    la += [(1.0, P({"head": {"r": (3, 0, 0)}, "chest": {"r": (0, 0, 0), "s": sq(1, 1)}, "spine": {"s": sq(1, 1)}},
+                   sym("arm", r=(0, -4, 0), s=(1, 1, 1)), ears(perk))),
+           (1.1, P({"head": {"r": (-1, 0, 0)}}, sym("arm", r=(0, 0, 0)), ears((0, 0, 0))))]
+    lf += [(1.0, {"jaw_open": 0.0, "smile": 0.6, **eyes(0.2)})]
+    A.action("laugh", 1.2, la, face=lf)
+
+    # head_shake: a quick shake after an ear touch, ears flapping behind the head
+    A.action("head_shake", 0.6, [
+        (0.06, P({"head": {"r": (4, 0, -5)}})),
+        (0.15, P({"head": {"r": (0, 0, 18)}, "chest": {"r": (0, 0, -3)}}, ears_same((0, -10, 0)))),
+        (0.25, P({"head": {"r": (0, 0, -16)}, "chest": {"r": (0, 0, 3)}}, ears_same((0, 16, 0)))),
+        (0.34, P({"head": {"r": (0, 0, 10)}, "chest": {"r": (0, 0, -2)}}, ears_same((0, -14, 0)))),
+        (0.43, P({"head": {"r": (0, 0, -5)}, "chest": {"r": (0, 0, 1)}}, ears_same((0, 9, 0)))),
+        (0.51, P({"head": {"r": (0, 0, 2)}, "chest": {"r": (0, 0, 0)}}, ears_same((0, -3, 0)))),
+    ], face=[(0.1, eyes(0.6)), (0.45, eyes(0.3)), (0.55, eyes(0.0))])
+
+    # run: bounding gallop, two strides per loop, no root translation (GDScript moves the pet)
+    gather = P({"root": {"r": (8, 0, 0)}, "spine": {"s": sq(1.07, 0.9)}, "chest": {"r": (6, 0, 0)},
+                "head": {"r": (-6, 0, 0)}}, sym("leg", r=(-30, 0, 0)), sym("arm", a=(0.45, 0.2, -0.85)),
+               ears(back), tail(0, -25))
+    reach = P({"root": {"r": (-6, 0, 0)}, "spine": {"s": sq(0.94, 1.08)}, "chest": {"r": (-4, 0, 0)},
+               "head": {"r": (4, 0, 0)}}, sym("leg", r=(30, 0, 0)), sym("arm", a=(0.4, -0.85, -0.2)),
+              ears(tuple(x * 1.3 for x in back)), tail(0, -35))
+    A.action("run", 0.5, [(0.0, gather), (0.125, reach), (0.25, gather), (0.375, reach)], loop=True)
+
+    # pounce: crouch with a bottom wiggle, leap (height only; GDScript moves it forward), squash, settle
+    crouch = {"spine": {"s": sq(1.12, 0.85)}, "chest": {"r": (10, 0, 0)}, "head": {"r": (-8, 0, 0)}}
+    A.action("pounce", 0.9, [
+        (0.1, P(crouch, {"root": {"l": (0, 0.02, -0.02)}}, ears(flat), tail(0, -10))),
+        (0.15, P({"root": {"r": (0, 0, 6), "l": (0, 0.02, -0.02)}})),
+        (0.2, P({"root": {"r": (0, 0, -6), "l": (0, 0.02, -0.02)}})),
+        (0.25, P(crouch, {"root": {"r": (0, 0, 0), "l": (0, 0.02, -0.025)}})),
+        (0.42, P({"root": {"l": (0, 0, 0.25), "r": (18, 0, 0)}, "spine": {"s": sq(0.9, 1.14)},
+                  "chest": {"r": (-6, 0, 0)}, "head": {"r": (-10, 0, 0)}},
+                 sym("arm", a=(0.3, -0.92, 0.2), s=(1, 1.15, 1)), sym("leg", r=(35, 0, 0)), ears(back), tail(0, -30))),
+        (0.6, P({"root": {"l": (0, 0, 0), "r": (6, 0, 0)}, "spine": {"s": sq(1.16, 0.84)}, "chest": {"r": (8, 0, 0)},
+                 "head": {"r": (10, 0, 0)}}, sym("arm", a=(0.4, -0.75, -0.5), s=(1, 1, 1)),
+                sym("leg", r=(0, 0, 0)), ears(perk), tail(0, 0))),
+        (0.72, P({"root": {"r": (-2, 0, 0)}, "spine": {"s": sq(0.96, 1.05)}, "chest": {"r": (-2, 0, 0)},
+                  "head": {"r": (-3, 0, 0)}}, sym("arm", r=(0, -3, 0)))),
+        (0.82, P({"root": {"r": (0, 0, 0)}, "spine": {"s": sq(1.01, 0.99)}, "chest": {"r": (0, 0, 0)},
+                  "head": {"r": (0, 0, 0)}}, sym("arm", r=(0, 0, 0)), ears((0, 0, 0)))),
+    ], face=[(0.25, {"smile": 0.5}), (0.42, {"jaw_open": 0.5, "smile": 0.9}), (0.62, {"jaw_open": 0.0}),
+             (0.85, {"smile": 0.3})])
+
+    # jump: a happy hop in place
+    A.action("jump", 0.6, [
+        (0.1, P({"spine": {"s": sq(1.12, 0.86)}, "head": {"r": (6, 0, 0)}}, sym("arm", r=(0, 8, 0)))),
+        (0.26, P({"root": {"l": (0, 0, 0.14)}, "spine": {"s": sq(0.92, 1.1)}, "head": {"r": (-8, 0, 0)}},
+                 sym("arm", a=(0.8, -0.3, 0.45)), sym("leg", r=(15, 0, 0)), ears(perk), tail(20))),
+        (0.4, P({"root": {"l": (0, 0, 0)}, "spine": {"s": sq(1.12, 0.87)}, "head": {"r": (5, 0, 0)}},
+                sym("arm", r=(0, -6, 0)), sym("leg", r=(0, 0, 0)), tail(-10))),
+        (0.5, P({"spine": {"s": sq(0.97, 1.03)}, "head": {"r": (-2, 0, 0)}}, sym("arm", r=(0, 1, 0)), ears((0, 0, 0)))),
+    ], face=[(0.15, {"smile": 0.9}), (0.5, {"smile": 0.4})])
 
 
 # ---------------------------------------------------------------- driver

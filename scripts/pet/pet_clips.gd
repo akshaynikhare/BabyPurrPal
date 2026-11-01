@@ -19,6 +19,8 @@ const FALLBACKS := {
 
 var _player: AnimationPlayer
 var _retakes := {}
+## Retake → the clip it copies.
+var _bases := {}
 
 
 func _init(player: AnimationPlayer) -> void:
@@ -33,6 +35,7 @@ func _init(player: AnimationPlayer) -> void:
 			library.add_animation(retake, library.get_animation(clip))
 		_retakes[StringName(clip)] = retake
 		_retakes[retake] = StringName(clip)
+		_bases[retake] = StringName(clip)
 		_player.set_blend_time(clip, IDLE, IDLE_BLEND_SEC)
 		_player.set_blend_time(retake, IDLE, IDLE_BLEND_SEC)
 
@@ -41,8 +44,13 @@ func _init(player: AnimationPlayer) -> void:
 func resolve(clip: StringName) -> StringName:
 	if _player.has_animation(clip):
 		return clip
-	var stand_in: StringName = FALLBACKS.get(clip, &"")
+	var stand_in: StringName = FALLBACKS.get(clip, PetReactions.ANIM_FALLBACKS.get(clip, &""))
 	return stand_in if _player.has_animation(stand_in) else &""
+
+
+## The clip a retake copies, or the clip itself.
+func base_of(clip: StringName) -> StringName:
+	return _bases.get(clip, clip)
 
 
 ## One-clip variants for the clips the GLB really has (no stand-ins, so a

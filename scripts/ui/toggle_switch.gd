@@ -44,6 +44,7 @@ func _gui_input(event: InputEvent) -> void:
 		accept_event()
 		set_on(not on)
 		Haptics.play(&"tap")
+		AudioDirector.play_sfx(&"ui_tap")
 		toggled.emit(on)
 
 

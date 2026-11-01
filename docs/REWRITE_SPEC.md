@@ -106,9 +106,14 @@ Every toy also plays the `feed` haptic. Particles appear at the toy.
   - shows the value to 2 decimals
 - **"Test Voice"** plays the simulated babble.
 - **Done**, **X** or tapping the backdrop closes the sheet.
-- **New:** settings are saved (`lullaby_on`, `voice_pitch`, `talkback_on`).
+- **New:** settings are saved (`lullaby_on`, `voice_pitch`, `talkback_on`, `music_on`, `ambience_on`, `quiet_mode`).
+- **New switches:**
+  - **"Play Music"** ("Happy tunes when the lullaby is off"), default OFF: loops the day music while the lullaby is off.
+  - **"Room Sounds"** ("Birds by day, crickets at night"), default ON: the room's ambience for the time of day.
+  - **"Quiet Mode"** ("Everything a little softer"), default OFF: the whole app 8 dB down.
 
 ## Audio (old procedural recipes; render each to OGG)
+Kept for history: the shipped sounds are ElevenLabs renders (Rewrite changes 5 and 8), except `babble`.
 Master gain 0.8; lullaby gain 0.25.
 
 | Sound | Recipe |
@@ -157,9 +162,10 @@ Defined in `autoload/haptics.gd`: tap, tickle, purr, paw, twinkle, bounce, feed,
    - **Noise floor:** calibrated at the start and kept as a running average. Recording starts when the level is above floor × start factor for about 100 ms, with about 300 ms of pre-roll. It stops after N quiet chunks (about 700 ms), with a minimum of 0.4 s and a maximum of 6 s.
    - **Clean-up:** trim trailing silence, apply a 60 ms fade-out, then normalize peak to about −3 dBFS.
    - **Playback:**
-     - Voice bus with `AudioEffectPitchShift`: `pitch_scale` = setting ± a random 0.05, with a slight wobble. Pitch rises without the voice speeding up.
+     - Voice bus with `AudioEffectPitchShift`: `pitch_scale` = setting × the pet's share (cat 1.0, dog 0.85, bunny 1.12) ± a random 0.05, with a slight wobble. Pitch rises without the voice speeding up.
+     - **New:** each pet has its own voice for its laughs, giggles and greetings (ElevenLabs renders, one designed voice per pet). These play at their own pitch, not through the pitch shifter.
      - **Never** re-hear its own playback: the mic is gated during TALK, plus about 400 ms of cooldown.
-     - **The app's own sounds:** a one-shot sound (SFX, haptic buzz) only pauses the detector for its length plus a short tail (150 ms; 100 ms for haptics). A clip in progress carries on, minus that part. Continuous sounds (the lullaby, the purr) never pause it; they duck by 14 dB while the pet listens and talks.
+     - **The app's own sounds:** a one-shot sound (SFX, haptic buzz) only pauses the detector for its length plus a short tail (150 ms; 100 ms for haptics). A clip in progress carries on, minus that part. Continuous sounds (the music, the purr, the room ambience) never pause it; they duck by 24 dB while the pet listens and talks.
      - **Lullaby:** the mic stays open. About 300 ms after the lullaby starts or stops, the noise floor is measured again, with music-aware settings while it plays.
    - **Mouth:** follows the playback amplitude, with smoothing, an open/close hysteresis and a response curve, and drives the `jaw_open` blend shape.
    - **"I'm listening" cues:** ears perk, and a head nod plays at random every 0.8–1.6 s while in LISTEN.
@@ -167,8 +173,19 @@ Defined in `autoload/haptics.gd`: tap, tickle, purr, paw, twinkle, bounce, feed,
      - Requested on the first interaction.
      - If denied, the pet shows "can't hear" (ears down plus a gentle hint).
      - If granted later, it recovers.
-5. **Audio:** all pre-rendered OGG on the SFX, Music and Voice buses. No runtime synthesis except pitch-shifting the recorded voice.
+5. **Audio:** all pre-rendered OGG on the SFX, Music, Voice and Loops buses. No runtime synthesis except pitch-shifting the recorded voice.
+   - SFX, loops and music are ElevenLabs Sound Effects / Eleven Music renders (`tools/audio/eleven_sounds.csv`), several takes per sound where it repeats often; a play picks one take without an immediate repeat, with a slight pitch and level change (not for musical and UI sounds).
+   - **Mix:** the pets' voice lines are the reference. One-shots sit about 6 dB under them, music about 9 dB, room ambience about 20 dB. Master and SFX each have a −1 dB limiter, so nothing clips and a burst of SFX never pulls the voice down.
 6. **Lifecycle:** when the app is backgrounded, everything pauses and the mic stops. Both restore on resume.
 7. **Performance:**
    - One pet, under about 15k triangles, with a single directional light, no shadows (or a blob shadow decal), and an inverted-hull outline.
    - CPUParticles3D or 2D overlays for hearts, stars, bubbles and paws.
+8. **Sound (the full map is in `docs/GODOT_ARCHITECTURE.md`, "Sound map"):**
+   - **Each pet sounds like itself:** cat meows, chirps and trills; dog woofs, yips, pants and whines to play; bunny squeaks, snuffles and thumps. Belly tickles boing.
+   - **Body sounds** follow the animation: walk-in steps (cat pads, dog steps, bunny hops), sitting, lying down, rolling over, jumps and landings, pounces, tumbles, wiggles with a tail swish, ear scratches and head shakes, the run patter in chases. A rare sneeze or hiccup during quiet time.
+   - **Toys:** the pet names the toy as it appears ("Ooh, milk!"); props pop in and out, milk and water pour, the glass clinks, the bowl clacks, the bone squeaks, the ball bounces, the yarn rolls, the bell jingles. Eating nibbles (cat), gnaws (dog) or crunches (bunny); drinking laps or sips, with gulps and a slurp at the end. The dog sighs after its bone.
+   - **Voice:** the walk-in greeting says good morning at sunrise and nighty night at night; the idle wave asks "Come play with me!"; at night the pet yawns now and then, and with the lullaby on it sometimes hums along.
+   - **After the child's echo** the pet adds a short call of its own (cat chirp, dog yip, bunny squeak), 6 dB under the echo.
+   - **Room:** a morning, day, evening or night ambience loop, cross-faded when the phase changes, starting with the first touch; a sunrise chime when morning comes and a nightfall chime at night (by clock or sun button).
+   - **UI:** soft taps, ticks, swooshes and pops for toys, switches, the slider, the sheet, zoom, the pet swipe, a "not now" bloop for a locked toy, and a rising tone while the gear is held, then an unlock chime.
+   - **Gear, zoom and sun button** use these instead of the old twinkle (the sun button keeps it for day and sunset).

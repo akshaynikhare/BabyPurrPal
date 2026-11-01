@@ -69,6 +69,51 @@ func _chords(sec: float, amp: float) -> PackedFloat32Array:
 	return out
 
 
+## A clock heard through the phone, like amb_night's: once a second a 1.6 kHz
+## knock swells over 20 ms and rings out at 250 dB/s.
+static func clock_ticks(rate: int, sec: float, amp: float) -> PackedFloat32Array:
+	var out := PackedFloat32Array()
+	out.resize(roundi(sec * rate))
+	var decay := exp(-250.0 / 20.0 * log(10.0) / rate)
+	for tick in ceili(sec):
+		var start := tick * rate
+		var e := amp
+		for i in mini(roundi(0.4 * rate), out.size() - start):
+			var t := float(i) / rate
+			out[start + i] += minf(t / 0.02, 1.0) * e * sin(TAU * 1600.0 * t)
+			e *= decay
+	return out
+
+
+## Birdsong: every 1.5 s a phrase of six 100 ms chirps (10 ms fades) sweeping 3.6–5.2 kHz,
+## 25 ms apart, so the phrase looks sustained to a level-only detector.
+static func birdsong(rate: int, sec: float, amp: float) -> PackedFloat32Array:
+	var out := PackedFloat32Array()
+	out.resize(roundi(sec * rate))
+	var chirp := roundi(0.1 * rate)
+	var phrase := 0.0
+	while phrase < sec:
+		for c in 6:
+			var start := roundi((phrase + c * 0.125) * rate)
+			var phase := 0.0
+			for i in clampi(out.size() - start, 0, chirp):
+				var u := float(i) / chirp
+				phase += TAU * lerpf(3600.0, 5200.0, u) / rate
+				out[start + i] += amp * minf(1.0, minf(u, 1.0 - u) * 10.0) * sin(phase)
+		phrase += 1.5
+	return out
+
+
+## Babble: "ba-ba-ba" at 400 Hz, syllables every 0.26 s that dip to silence.
+func _babble(sec: float, amp: float) -> PackedFloat32Array:
+	var out := PackedFloat32Array()
+	out.resize(roundi(sec * RATE))
+	for i in out.size():
+		var t := float(i) / RATE
+		out[i] = amp * (0.5 - 0.5 * cos(24.0 * t)) * sin(TAU * 400.0 * t)
+	return out
+
+
 ## Feeds in uneven chunks, like a real driver.
 func _feed(det: VoiceDetector, samples: PackedFloat32Array) -> void:
 	var i := 0
@@ -86,6 +131,9 @@ func test_silence_never_triggers() -> void:
 	# Exact zeros: a recorder that isn't delivering. Never calibrates, never triggers.
 	_feed(det, _noise(5.0, 0.0))
 	check(not det.is_calibrated(), "digital silence doesn't calibrate")
+	# The Mic bus filters' ringing tail after a recorder closes: tiny, never zero.
+	_feed(det, _noise(1.0, 0.000000001))
+	check(not det.is_calibrated(), "a filter tail is still digital silence")
 	check_eq(_started, 0, "started")
 	# A very quiet real room calibrates to the minimum floor and stays quiet.
 	_feed(det, _noise(5.0, 0.0002))
@@ -214,3 +262,55 @@ func test_lullaby_chords_never_trigger_in_music_mode() -> void:
 	det = _make()
 	_feed(det, song)
 	check(_started > 0, "without music mode the same song triggers")
+
+
+func test_clock_ticks_never_trigger() -> void:
+	for amp in [0.03, 0.08, 0.2]:
+		var det := _make()
+		_feed(det, _noise(1.0, 0.002))
+		_feed(det, _mix(_noise(10.0, 0.002), clock_ticks(RATE, 10.0, amp)))
+		check_eq(_started, 0, "ticks at amp %s" % amp)
+		_feed(det, _mix(_tone(1.0, 0.3), clock_ticks(RATE, 1.0, amp)))
+		_feed(det, _noise(1.5, 0.002))
+		check_eq(_clips.size(), 1, "a child over the clock at amp %s" % amp)
+	# Why the hold rule exists: the knock outlasts the sustain window.
+	var det := _make()
+	det.onset_max_drop_db = 100.0
+	det.configure(RATE)
+	_feed(det, _noise(1.0, 0.002))
+	_feed(det, _mix(_noise(10.0, 0.002), clock_ticks(RATE, 10.0, 0.2)))
+	check(_started > 0, "without the hold rule the clock triggers")
+
+
+func test_birdsong_never_triggers() -> void:
+	for amp in [0.02, 0.06, 0.2]:
+		var det := _make()
+		_feed(det, _noise(1.0, 0.002))
+		_feed(det, _mix(_noise(10.0, 0.002), birdsong(RATE, 10.0, amp)))
+		check_eq(_started, 0, "birdsong at amp %s" % amp)
+		_feed(det, _mix(_tone(1.0, 0.3), birdsong(RATE, 1.0, amp)))
+		_feed(det, _noise(1.5, 0.002))
+		check_eq(_clips.size(), 1, "a child over the birds at amp %s" % amp)
+	# Why the pitch rule exists: a phrase of chirps looks sustained.
+	var det := _make()
+	det.voice_max_hz = 100000.0
+	det.configure(RATE)
+	_feed(det, _noise(1.0, 0.002))
+	_feed(det, _mix(_noise(10.0, 0.002), birdsong(RATE, 10.0, 0.06)))
+	check(_started > 0, "without the pitch rule the birds trigger")
+
+
+func test_babble_still_starts_promptly() -> void:
+	var det := _make()
+	_feed(det, _noise(1.0, 0.002))
+	var audio := _mix(_babble(1.5, 0.3), _noise(1.5, 0.002))
+	var window := roundi(det.window_sec * RATE)
+	var fed := 0
+	while _started == 0 and fed < audio.size():
+		det.feed(audio.slice(fed, fed + window))
+		fed += window
+	check_eq(_started, 1, "started")
+	check(float(fed) / RATE <= 0.3, "within the first syllable, got %.2f s" % (float(fed) / RATE))
+	det.feed(audio.slice(fed))
+	_feed(det, _noise(1.5, 0.002))
+	check_eq(_clips.size(), 1, "one clip")

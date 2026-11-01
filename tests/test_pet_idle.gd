@@ -55,3 +55,28 @@ func test_nose_twitches_every_3_to_6_s() -> void:
 			check(t - last >= 3.0 - STEP and t - last <= 6.0 + STEP, "gap %.3f" % (t - last))
 			last = t
 	check(fired >= 5, "fired %d times in 30 s" % fired)
+
+
+func test_surprises_are_rare_and_wait_until_free() -> void:
+	var idle := PetIdle.new(7)
+	var times := []
+	for i in int(300.0 / STEP):
+		idle.update(STEP, true)
+		if idle.surprise(STEP, true):
+			times.append((i + 1) * STEP)
+	check(times.size() >= 3 and times.size() <= 7, "a sneeze or hiccup every 45–90 s, got %s" % [times])
+	var last := 0.0
+	for t in times:
+		check(t - last >= PetIdle.SURPRISE_MIN_SEC - STEP and t - last <= PetIdle.SURPRISE_MAX_SEC + STEP, "gap %.3f" % (t - last))
+		last = t
+	var busy := PetIdle.new(7)
+	for i in int(120.0 / STEP):
+		check(not busy.surprise(STEP, false), "never while busy")
+
+
+func test_surprises_leave_the_break_timing_alone() -> void:
+	var plain := PetIdle.new(3)
+	var surprised := PetIdle.new(3)
+	for i in int(60.0 / STEP):
+		check_eq(surprised.update(STEP, true), plain.update(STEP, true), "same events at %.3f" % ((i + 1) * STEP))
+		surprised.surprise(STEP, true)

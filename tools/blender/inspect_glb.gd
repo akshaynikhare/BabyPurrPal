@@ -5,12 +5,15 @@ extends SceneTree
 const PETS: Array[String] = ["cat", "dog", "bunny"]
 const SHAPES: Array[String] = ["jaw_open", "blink_L", "blink_R", "smile", "ear_perk"]
 const BONES: Array[String] = ["root", "spine", "chest", "head", "ear_L", "ear_R", "tail",
-	"arm_L", "arm_R", "leg_L", "leg_R"]
+	"arm_L", "arm_R", "leg_L", "leg_R", "hold"]
 const ANIMS: Array[String] = ["idle_breathe", "happy_bounce", "giggle", "paw_highfive_L",
 	"paw_highfive_R", "listen_nod", "walk_in", "look_around", "stretch", "ear_perk",
 	"yawn", "scratch_ear", "happy_wiggle", "laugh_tumble", "wave",
-	"drink", "lap", "bite", "chew", "bat_paw_L", "bat_paw_R", "sniff"]
-const LOOPED: Array[String] = ["idle_breathe", "walk_in"]
+	"drink", "lap", "bite", "chew", "bat_paw_L", "bat_paw_R", "sniff",
+	"excited", "sit_down", "sit_idle", "stand_up", "sit_hold_eat", "sit_hold_drink", "sit_lap",
+	"sit_bat_L", "sit_bat_R", "lie_down", "lie_play", "get_up", "laugh", "head_shake",
+	"run", "pounce", "jump"]
+const LOOPED: Array[String] = ["idle_breathe", "walk_in", "sit_idle", "lie_play", "run"]
 const MAX_TRIS := 15000
 
 var _fails := 0

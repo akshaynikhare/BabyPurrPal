@@ -10,7 +10,8 @@ the game outlines.
 Writes PNGs to tools/blender/previews/: <pet>_34.png, <pet>_side.png, <pet>_jaw.png,
 <pet>_blink.png (1024x1024), <pet>_mouth.png (front row, 3/4 row; jaw 0 / 0.4 / 1.0),
 <pet>_smile.png (closed smile), <pet>_nose_twitch.png (rest, twitch; pets with the key),
-<pet>_actions.png (one mid frame per clip in ACTION_FRAMES), plus lineup.png (3072x1024).
+<pet>_actions.png and <pet>_actions_toys.png (one mid frame per clip in ACTION_FRAMES /
+TOY_FRAMES), plus lineup.png (3072x1024).
 """
 
 import argparse
@@ -36,6 +37,10 @@ TILES = HERE / "out" / "tiles"
 ACTION_FRAMES = [("yawn", 0.8), ("scratch_ear", 0.5), ("happy_wiggle", 0.4), ("laugh_tumble", 0.95),
                  ("wave", 0.42), ("drink", 0.75), ("lap", 0.9), ("bite", 0.22), ("chew", 0.14),
                  ("bat_paw_L", 0.24), ("bat_paw_R", 0.24), ("sniff", 0.36)]
+TOY_FRAMES = [("excited", 0.26), ("sit_down", 0.45), ("sit_idle", 0.5), ("stand_up", 0.16),
+              ("sit_hold_eat", 0.5), ("sit_hold_drink", 1.0), ("sit_lap", 0.84), ("sit_bat_L", 0.22),
+              ("sit_bat_R", 0.22), ("lie_down", 0.62), ("lie_play", 0.2), ("get_up", 0.4),
+              ("laugh", 0.28), ("head_shake", 0.25), ("run", 0.125), ("pounce", 0.42), ("jump", 0.26)]
 
 
 def lin(hexstr):
@@ -350,14 +355,15 @@ def pet_views(pet):
     # one mid frame of each clip, full body
     sc.render.resolution_x = sc.render.resolution_y = 512
     shape(objs)
-    tiles = []
-    for name, t in ACTION_FRAMES:
-        if play(objs, name, t):
-            camera(sc, mid + Vector((0, 0, 0.04)), 32, 10, top * 1.3)
-            tiles.append(tile(sc, f"{pet}_act_{name}.png"))
-    stop(objs)
-    if tiles:
-        sheet(tiles, 4, f"{pet}_actions.png")
+    for frames, out, cols in ((ACTION_FRAMES, f"{pet}_actions.png", 4), (TOY_FRAMES, f"{pet}_actions_toys.png", 6)):
+        tiles = []
+        for name, t in frames:
+            if play(objs, name, t):
+                camera(sc, mid + Vector((0, 0, 0.1)), 32, 10, top * 1.45)
+                tiles.append(tile(sc, f"{pet}_act_{name}.png"))
+        stop(objs)
+        if tiles:
+            sheet(tiles, cols, out)
 
 
 def poses(pet):

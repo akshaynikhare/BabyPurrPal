@@ -1,56 +1,88 @@
 """Rebuild assets/audio/MANIFEST.md from the rendered files (durations are read from disk).
+SFX and music are described by their prompt in eleven_sounds.csv; voice lines by their text
+in eleven_lines.csv and what the game says them for.
 
   /Users/akshay/Downloads/baby_apps/.tools/kokoro-venv/bin/python tools/audio/make_manifest.py
 """
+import csv
 import pathlib
+import re
 import soundfile as sf
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 AUDIO = ROOT / "assets/audio"
+HERE = ROOT / "tools/audio"
+PETS = ("cat", "dog", "bunny")
+SCALE = [261.63, 293.66, 329.63, 392.0, 440.0, 523.25, 587.33, 659.25, 783.99, 880.0]
 
-SFX = {
-    **{f"chime_{i}": f"Scale note {i} ({n} Hz); background-tap chime index {i}, chimes 3/4 for start/gate-release"
-       for i, n in enumerate([261.63, 293.66, 329.63, 392.0, 440.0, 523.25, 587.33, 659.25, 783.99, 880.0])},
-    "giggle": "Six rising triangle blips; belly tickle, yarn ball, tennis ball",
-    "paw_tap": "Falling triangle thump 320 to 140 Hz; paws, fish, bone",
-    "twinkle": "Four-note rising sparkle; ears, cheeks, bell, time-of-day change, gate open",
-    "purr_loop": "Seamless 2.5 s purr loop (26 Hz saw through 80 Hz and 220 Hz bands, 3.6 Hz wobble). Loop it; fade the volume in/out in code. Has loop=true in its .import file",
-    "purr_tail": "0.25 s fade-out that continues purr_loop from its first sample; play it right after the loop ends",
-    "woof": "Dog bark; bandpassed 260 to 460 to 220 Hz sweep",
-    "pant": "Three soft breathy pants",
-    "squeak": "Rabbit squeak, 880 to 1380 Hz sweep",
-    "crunch": "Four quick crunch blips with grit; carrot",
-    "footstep": "Soft low thump; pet walk-in steps",
-    "babble": "1.4 s simulated babble (520/650/440/720 Hz steps); Test Voice and mimic without mic; played through the pitch path",
-    "bounce_1": "Rubber-ball boing, 600 to 230 Hz fall with a fast-fading wobble; ball bounce",
-    "bounce_2": "Softer, lower rubber-ball boing, 480 to 190 Hz; ball bounce variant",
-    "gulp_1": "Warm cartoon swallow: pitch dips 430 to 200 Hz then rises, soft click at the turn; drinking",
-    "gulp_2": "Lower, bubblier gulp (360 to 165 Hz dip, 26 Hz wobble); drinking",
-    "gulp_3": "Small bright gulp (520 to 250 Hz dip, quick rise); drinking",
-    "jingle_1": "Four small bell strikes, inharmonic partials with fast decay; bell jingle",
-    "jingle_2": "Five small bell strikes starting lower, sparkly; bell jingle variant",
-    "lap_1": "Two quick tongue-lap ticks, rising liquid bloop plus a soft smack; drinking",
-    "lap_2": "Two quick tongue-lap ticks, higher then lower; drinking variant",
-    "munch_1": "Two soft chewing crunches, lighter and shorter than crunch; eating",
-    "munch_2": "Three quick soft chews; eating variant",
-    "pop_in": "Soft rising pop with two sparkle pings; prop appears",
-    "pop_out": "Falling sparkle then a soft sucked-in bloop; prop disappears",
-    "roll": "Soft yarn-ball rumble with a little upper whoosh and a slowing 8 to 5 Hz pulse; rolling",
-    "slurp": "Rising slurp, 320 to 980 Hz glide with soft air and a small end pip; drinking",
-    "splash": "Soft filtered-noise burst with a trickle and three droplet pings; water",
-    "yum": "Tiny two-note 'mm-hm' hum (C5 then E5, 6 Hz vibrato); end of a meal",
+# Files not rendered straight from a prompt.
+OTHER = {
+    **{f"chime_{i}": f"The kalimba take retuned to {n} Hz; background-tap chime {i} (3 on start, 4 on an early gear release)"
+       for i, n in enumerate(SCALE)},
+    "purr_tail": "0.25 s fade-out that continues purr_loop from its first sample; played right after the loop stops",
+    "babble": "1.4 s project-made synth babble (520/650/440/720 Hz steps); Test Voice and mimic without mic; "
+              "played through the pitch path",
 }
-TOY_LEVELS = ("The toy-system one-shots (`bounce_*`, `gulp_*`, `jingle_*`, `lap_*`, `munch_*`, `pop_in`, `pop_out`, "
-              "`roll`, `slurp`, `splash`, `yum`) are levelled to about -19 LUFS (K-weighted, whole clip) like "
-              "`crunch`, `giggle` and `paw_tap`, so their peaks sit between -2 and -11 dBFS.")
-MUSIC = {
-    "lullaby": "Seamless 12.8 s loop of the C, Am, F, G arpeggios (soothing lullaby). Has loop=true in its .import file",
+VOICE = {
+    **{f"laugh_{i}": f"Belly tickle, laugh variant {i}" for i in range(1, 7)},
+    **{f"giggle_{i}": "Cheeks, ears, first tickles" for i in range(1, 6)},
+    **{f"squeal_{i}": "Paw high five" for i in range(1, 3)},
+    **{f"yum_{i}": "End of a meal" for i in range(1, 3)},
+    "ahh": "Content sigh",
+    "ooh": "Wonder; ears",
+    "hooray": "After the tickle tumble",
+    "wow": "Amazement",
+    **{f"hello_{i}": "Walk-in greeting by day and at sunset" for i in range(1, 4)},
+    **{f"come_play_{i}": "With the wave after a quiet spell" for i in range(1, 3)},
+    "morning": "Walk-in greeting at sunrise",
+    "night": "Walk-in greeting at night",
+    "yawn": "With the idle yawn at night",
+    "hum": "Now and then while idle with the lullaby on",
 }
+LEVELS = ("Levels (integrated LUFS, peaks soft-limited to -1 dBFS): one-shots -22, `ui_*` -25, loops -24, "
+          "`amb_*` -30, music -20; pet voice lines -19, the reference. At runtime the SFX bus sits at -3 dB, music "
+          "at -8 dB and ambience at -9 dB (on Loops), which puts one-shots about 6 dB, music about 9 dB and "
+          "ambience about 20 dB under the voice; Master and SFX each have a -1 dB limiter.")
+SOURCES = ("SFX, loops and music are ElevenLabs renders from `tools/audio/eleven_sounds.csv` (`gen_sounds_eleven.py`): "
+           "mono 44.1 kHz OGG Vorbis, trimmed and faded one-shots, seamless loops (loop=true in their .import files). "
+           "A sound kept several times is `<id>_1` ... `<id>_N`; `AudioDirector.play_sfx(&\"<id>\")` plays one of them "
+           "without an immediate repeat.")
+VOICE_NOTE = ("Voice lines are ElevenLabs renders in one designed voice per pet (`tools/audio/design_voices.py`; voice ids in "
+              "`eleven_voices.json`). The lines are in `eleven_lines.csv`, rendered as three takes each and picked with "
+              "`gen_voice_eleven.py`, then post-processed by `gen_voice.postprocess`: 16-bit mono 24 kHz WAV, about -19 LUFS, "
+              "peak at most -2 dBFS, with 100 ms of trailing silence. `PetVoice` plays the current pet's folder through "
+              "`TalkBack.play_clip` at its own pitch (straight to the Voice bus), with mouth sync from each folder's "
+              "`envelopes.json` and the mic gate.")
 
 
-def table(folder, bus, descs):
-    lines = [f"## {folder}/ ({bus} bus)", "", "| id | duration | what it is |", "|---|---|---|"]
-    for p in sorted((AUDIO / folder).glob("*.ogg")):
+def prompts():
+    rows = csv.DictReader(open(HERE / "eleven_sounds.csv", encoding="utf-8"))
+    return {r["id"]: f"{r['prompt']} ({r['kind']})" for r in rows}
+
+
+def sound_descs():
+    by_id = prompts()
+    descs = {}
+    for folder in ("sfx", "music"):
+        for p in (AUDIO / folder).glob("*.ogg"):
+            base = re.sub(r"_\d+$", "", p.stem)
+            descs[p.stem] = OTHER.get(p.stem) or by_id.get(p.stem) or by_id.get(base, "")
+    return descs
+
+
+def voice_descs(pet):
+    rows = csv.DictReader(open(HERE / "eleven_lines.csv", encoding="utf-8"))
+    out = {}
+    for r in rows:
+        if r["pet"] == pet:
+            use = "Said as the toy appears" if r["id"].startswith("toy_") else VOICE.get(r["id"], "")
+            out[r["id"]] = f"\"{r['text']}\"; {use}"
+    return out
+
+
+def table(folder, bus, descs, ext="ogg"):
+    lines = [f"## {folder}/ ({bus})", "", "| id | duration | what it is |", "|---|---|---|"]
+    for p in sorted((AUDIO / folder).glob(f"*.{ext}")):
         if p.stem.startswith("smoke_"):
             continue
         info = sf.info(str(p))
@@ -59,14 +91,17 @@ def table(folder, bus, descs):
 
 
 def main():
+    descs = sound_descs()
     out = ["# BabyPurrPal audio manifest", "",
            "Generated by `tools/audio/make_manifest.py`. Load by name through `AudioDirector` "
-           "(`assets/audio/{sfx,voice,music}/<name>.ogg`). All clips are mono 44.1 kHz OGG Vorbis.",
-           "SFX peak about -3 dBFS; loops (`purr_loop`, `purr_tail`) and `lullaby` peak about -6 dBFS.",
-           TOY_LEVELS,
-           "There are no pre-rendered voice clips: spoken output is the player's own recorded voice, "
-           "pitch-shifted at runtime (the `babble` clip is the mic-less fallback).", "",
-           table("sfx", "SFX", SFX), table("music", "Music", MUSIC)]
+           "(`assets/audio/{sfx,music}/<name>.ogg`).",
+           SOURCES, LEVELS,
+           "Talk-back repeats the player's own recorded voice, pitch-shifted at runtime "
+           "(the `babble` clip is the mic-less fallback).",
+           VOICE_NOTE, "",
+           table("sfx", "SFX bus; `purr_*`, `amb_*` on Loops", descs),
+           *[table(f"voice/{pet}", "Voice bus, via PetVoice", voice_descs(pet), "wav") for pet in PETS],
+           table("music", "Music bus", descs)]
     (AUDIO / "MANIFEST.md").write_text("\n".join(out))
 
 

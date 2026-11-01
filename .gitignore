@@ -16,3 +16,7 @@ coverage/
 # Review artifacts (regenerable)
 tools/screens/
 tools/blender/previews/
+
+# Python
+__pycache__/
+*.pyc

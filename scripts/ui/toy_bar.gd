@@ -1,7 +1,8 @@
 class_name ToyBar
 extends HBoxContainer
 ## Three toy buttons for the current pet. Buttons are reused; only icon, colour and label change.
-## Locked (dimmed, presses ignored) while a toy session runs, across pet changes too.
+## Locked (dimmed, presses answered with a soft "not now") while a toy session runs,
+## across pet changes too.
 
 const BUTTON_SIZE := 156.0
 
@@ -25,6 +26,7 @@ func _ready() -> void:
 		button.custom_minimum_size = Vector2.ONE * BUTTON_SIZE
 		button.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 		button.pressed.connect(_on_pressed.bind(i))
+		button.refused.connect(AudioDirector.play_sfx.bind(&"ui_nope"))
 		cell.add_child(button)
 		var label := Label.new()
 		label.theme_type_variation = &"ToyLabel"
@@ -55,4 +57,5 @@ func set_locked(on: bool) -> void:
 
 
 func _on_pressed(i: int) -> void:
+	AudioDirector.play_sfx(&"ui_toy")
 	EventBus.toy_used.emit(_toys[i].id)

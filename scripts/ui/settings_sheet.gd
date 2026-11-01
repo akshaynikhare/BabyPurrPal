@@ -8,8 +8,8 @@ var bottom_inset := 0.0
 
 var _backdrop: ColorRect
 var _sheet: PanelContainer
-var _lullaby: ToggleSwitch
-var _talk: ToggleSwitch
+## Setting key → its switch.
+var _toggles := {}
 var _pitch: HSlider
 var _pitch_value: Label
 var _syncing := false
@@ -52,6 +52,7 @@ func open() -> void:
 	_tween = create_tween().set_parallel()
 	_tween.tween_property(_backdrop, "modulate:a", 1.0, SLIDE_SEC)
 	_tween.tween_property(_sheet, "position:y", target, SLIDE_SEC).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	AudioDirector.play_sfx(&"ui_open")
 	EventBus.settings_opened.emit()
 
 
@@ -59,6 +60,7 @@ func close() -> void:
 	if not _open:
 		return
 	_open = false
+	AudioDirector.play_sfx(&"ui_close")
 	_kill_tween()
 	_tween = create_tween().set_parallel()
 	_tween.tween_property(_backdrop, "modulate:a", 0.0, 0.25)
@@ -81,11 +83,11 @@ func _on_backdrop_input(event: InputEvent) -> void:
 
 
 func _sync() -> void:
-	if _lullaby == null:
+	if _pitch == null:
 		return
 	_syncing = true
-	_lullaby.set_on(Settings.get_value(&"lullaby_on"), false)
-	_talk.set_on(Settings.get_value(&"talkback_on"), false)
+	for key: StringName in _toggles:
+		(_toggles[key] as ToggleSwitch).set_on(Settings.get_value(key), false)
 	_pitch.value = Settings.get_value(&"voice_pitch")
 	_pitch_value.text = "%.2f" % _pitch.value
 	_syncing = false
@@ -121,19 +123,12 @@ func _build_sheet() -> void:
 	x.pressed.connect(close)
 	title_row.add_child(x)
 
-	_lullaby = ToggleSwitch.new()
-	col.add_child(_row("Soothing Lullaby", "Gentle calming chords", UiStyle.PINK, _lullaby))
-	_lullaby.toggled.connect(func(v: bool) -> void:
-		if not _syncing:
-			Settings.set_value(&"lullaby_on", v))
-
+	col.add_child(_toggle_row(&"lullaby_on", "Soothing Lullaby", "Gentle calming chords", UiStyle.PINK))
+	col.add_child(_toggle_row(&"music_on", "Play Music", "Happy tunes when the lullaby is off", UiStyle.PEACH))
+	col.add_child(_toggle_row(&"ambience_on", "Room Sounds", "Birds by day, crickets at night", UiStyle.SKY))
 	col.add_child(_pitch_block())
-
-	_talk = ToggleSwitch.new()
-	col.add_child(_row("Talking Pet", "Repeats what it hears", UiStyle.MINT, _talk))
-	_talk.toggled.connect(func(v: bool) -> void:
-		if not _syncing:
-			Settings.set_value(&"talkback_on", v))
+	col.add_child(_toggle_row(&"talkback_on", "Talking Pet", "Repeats what it hears", UiStyle.MINT))
+	col.add_child(_toggle_row(&"quiet_mode", "Quiet Mode", "Everything a little softer", UiStyle.CREAM))
 
 	var buttons := HBoxContainer.new()
 	buttons.add_theme_constant_override("separation", 16)
@@ -144,6 +139,16 @@ func _build_sheet() -> void:
 	var done := _text_button("Done", &"MintButton")
 	done.pressed.connect(close)
 	buttons.add_child(done)
+
+
+## A row with a switch that saves `key`.
+func _toggle_row(key: StringName, title: String, subtitle: String, tint: Color) -> Control:
+	var toggle := ToggleSwitch.new()
+	_toggles[key] = toggle
+	toggle.toggled.connect(func(v: bool) -> void:
+		if not _syncing:
+			Settings.set_value(key, v))
+	return _row(title, subtitle, tint, toggle)
 
 
 func _row(title: String, subtitle: String, tint: Color, toggle: ToggleSwitch) -> Control:
@@ -219,6 +224,7 @@ func _pitch_block() -> Control:
 func _on_pitch_changed(v: float) -> void:
 	_pitch_value.text = "%.2f" % v
 	if not _syncing:
+		AudioDirector.play_sfx(&"ui_tick")
 		Settings.set_value(&"voice_pitch", snappedf(v, 0.05))
 
 

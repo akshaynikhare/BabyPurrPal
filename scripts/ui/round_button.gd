@@ -3,6 +3,8 @@ extends Control
 ## Round button with a squishy press. Its face is blitted from UiAtlas; it redraws only when icon or colour change.
 
 signal pressed
+## A press while disabled (a toy while another one runs).
+signal refused
 
 const DISABLED_ALPHA := 0.55
 
@@ -52,6 +54,11 @@ func set_disabled(on: bool) -> void:
 
 func _gui_input(event: InputEvent) -> void:
 	if disabled:
+		# Touch only: the mouse event emulated from the same touch would refuse twice.
+		var touch := event as InputEventScreenTouch
+		if touch and touch.pressed:
+			accept_event()
+			refused.emit()
 		return
 	var kind := _tap.feed(event)
 	if kind == TapFilter.Kind.NONE:

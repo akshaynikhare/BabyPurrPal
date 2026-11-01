@@ -1,10 +1,13 @@
 class_name GearButton
 extends RoundButton
-## Parent gate: hold to fill the ring. Too-short taps wobble and chime; a full hold opens settings.
+## Parent gate: hold to fill the ring while a tone rises. Too-short taps wobble and
+## chime; a full hold unlocks and opens settings.
 
 signal gate_opened
 
 const RING_COLOR := Color("FF8FA3")
+## Rises over HoldGate.HOLD_SEC.
+const HOLD_SFX := &"ui_hold"
 
 var _gate := HoldGate.new()
 
@@ -20,6 +23,7 @@ func _on_down() -> void:
 	_gate.begin()
 	_restart_tween().tween_property(self, "scale", Vector2(0.94, 0.94), 0.1)
 	set_process(true)
+	AudioDirector.start_sfx(HOLD_SFX)
 
 
 func _on_up(_inside: bool) -> void:
@@ -31,7 +35,8 @@ func _process(delta: float) -> void:
 		set_process(false)
 		queue_redraw()
 		release_squish()
-		AudioDirector.play_sfx(&"twinkle")
+		AudioDirector.stop_sfx(HOLD_SFX)
+		AudioDirector.play_sfx(&"ui_unlock")
 		Haptics.play(&"twinkle")
 		_gate.release()
 		gate_opened.emit()
@@ -41,6 +46,7 @@ func _process(delta: float) -> void:
 
 func _finish_hold() -> void:
 	set_process(false)
+	AudioDirector.stop_sfx(HOLD_SFX)
 	if _gate.release():
 		AudioDirector.play_sfx(&"chime_4")
 		Haptics.play(&"tap")
@@ -55,6 +61,7 @@ func cancel_press() -> void:
 	_tap.reset()
 	if _gate.holding:
 		_gate.release()
+		AudioDirector.stop_sfx(HOLD_SFX)
 		set_process(false)
 		release_squish()
 		queue_redraw()

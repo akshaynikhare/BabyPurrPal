@@ -1,0 +1,94 @@
+pet,id,text
+cat,laugh_1,[laughs] Ha ha ha ha!
+cat,laugh_2,[laughs harder] Hahaha! Hee hee hee!
+cat,laugh_3,"[starts laughing] Ahaha, that tickles!"
+cat,laugh_4,[giggling uncontrollably] Hee hee hee hee hee!
+cat,giggle_1,[giggles] Hee hee!
+cat,giggle_2,[giggles] Tee hee!
+cat,giggle_3,[mischievously] Hehehe!
+cat,squeal_1,[excited] Wheee!
+cat,squeal_2,[excited] Yaaay!
+cat,yum_1,"[happily] Mmm, yummy!"
+cat,yum_2,Mmm mmm! [purrs]
+cat,ahh,[sighs happily] Ahhh.
+cat,ooh,[curious] Oooh!
+cat,hooray,[excited] Hoo-ray!
+cat,wow,[amazed] Wooow!
+cat,hello_1,[excited] Hi there!
+cat,hello_2,Mew! Hello!
+dog,laugh_1,[laughs heartily] Ha ha ha ha ha!
+dog,laugh_2,[laughs harder] Hahaha! Ha ha ha!
+dog,laugh_3,[chuckles] Heh heh heh! [laughs] Ha ha!
+dog,laugh_4,[wheezing] Ha ha ha... that tickles!
+dog,giggle_1,[giggles] Hehe!
+dog,giggle_2,[snorts] Heh heh!
+dog,giggle_3,[giggles] Hee hee hee!
+dog,squeal_1,[excited] Woo-hoo!
+dog,squeal_2,[excited] Yippee!
+dog,yum_1,"[happily] Mmm, yummy!"
+dog,yum_2,Nom nom nom! Mmm!
+dog,ahh,[sighs happily] Ahhh.
+dog,ooh,[curious] Ooooh!
+dog,hooray,[excited] Hoo-ray!
+dog,wow,[amazed] Woooow!
+dog,hello_1,"[excited] Hey, buddy!"
+dog,hello_2,Hi hi hi! Let's play!
+bunny,laugh_1,[laughs] Ha ha ha ha!
+bunny,laugh_2,[cackles] Hahahaha!
+bunny,laugh_3,"[laughs harder] Ha ha, stop, stop!"
+bunny,laugh_4,[wheezing] Ha ha ha... hee hee!
+bunny,giggle_1,[giggles] Hee hee!
+bunny,giggle_2,[snickers] Heh heh heh!
+bunny,giggle_3,[mischievously] Hehehe!
+bunny,squeal_1,[excited] Wheee!
+bunny,squeal_2,[excited] Let's gooo!
+bunny,yum_1,"[happily] Mmm, yummy!"
+bunny,yum_2,"Ooh, crunchy! Mmm!"
+bunny,ahh,"[sighs happily] Ahhh, nice."
+bunny,ooh,[curious] Oooh!
+bunny,hooray,[excited] Hoo-ray!
+bunny,wow,[amazed] Whoa! Wooow!
+bunny,hello_1,[excited] Yo! Hi there!
+bunny,hello_2,"Ohh, hey hey!"
+cat,laugh_5,"[laughs] Hee hee hee, ha ha!"
+cat,laugh_6,"[laughing] Ahaha! Stop it, hee hee!"
+cat,giggle_4,[giggles softly] Hehe!
+cat,giggle_5,[giggles] Tee hee hee!
+cat,toy_milk,"[excited] Ooh, milk! My favourite!"
+cat,toy_fish,[excited] Fishy! Yummy fishy!
+cat,toy_yarn,[excited] Yarn ball! Let's play!
+cat,come_play_1,[happily] Come play with me!
+cat,come_play_2,[curious] Where are you? Let's play!
+cat,morning,[cheerfully] Good morning!
+cat,night,[sleepily] Nighty night... [yawns]
+cat,yawn,"[yawns] Mmm, sleepy."
+cat,hum,"[humming softly] Mmm hmm hmm, mmm hmm."
+cat,hello_3,Mew! Mew! Hi friend!
+dog,laugh_5,[laughs] Ha ha ha! Woof!
+dog,laugh_6,"[laughs heartily] Hahaha! Again, again!"
+dog,giggle_4,[giggles] Heh heh!
+dog,giggle_5,[snickers] Hee hee hee!
+dog,toy_bone,[excited] A bone! My bone!
+dog,toy_water,"[happily] Ooh, water! Slurp slurp!"
+dog,toy_ball,[excited] Ball! Ball! Throw the ball!
+dog,come_play_1,[excited] Come play with me!
+dog,come_play_2,[eagerly] Hey! Wanna play?
+dog,morning,"[cheerfully] Good morning, buddy!"
+dog,night,[sleepily] Nighty night... [yawns]
+dog,yawn,"[yawns] Ahh, sleepy."
+dog,hum,"[humming softly] Hmm hmm hmm, hmm."
+dog,hello_3,Woof woof! Hi there!
+bunny,laugh_5,[cackles] Hahaha! Oh man!
+bunny,laugh_6,"[laughs] Ha ha! Stop, stop, hee hee!"
+bunny,giggle_4,[snickers] Heh heh!
+bunny,giggle_5,[giggles] Hee hee hee!
+bunny,toy_carrot,[excited] Carrot! Crunchy crunchy!
+bunny,toy_clover,"[happily] Ooh, clover! Yummy!"
+bunny,toy_bell,[excited] A bell! Jingle jingle!
+bunny,come_play_1,[excited] Yo! Come play with me!
+bunny,come_play_2,"[curious] Hey, where'd you go? Let's play!"
+bunny,morning,[cheerfully] Good morning!
+bunny,night,[sleepily] Nighty night... [yawns]
+bunny,yawn,"[yawns] Whoa, sleepy."
+bunny,hum,"[humming] Hmm hmm hmm, hmm hmm."
+bunny,hello_3,[sniffs] Hey hey! Hi there!

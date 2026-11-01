@@ -2,8 +2,8 @@ class_name TalkBack
 extends Node
 ## Listens for the child's voice, then repeats it pitched up with the pet's mouth
 ## following along. Owns two runtime buses:
-##   Mic        muted; AudioStreamMicrophone → AudioEffectCapture (read in _process)
-##   TalkBackFX AudioEffectPitchShift, sends to Voice
+##   Mic        muted; AudioStreamMicrophone → high-pass → low-pass → AudioEffectCapture (read in _process)
+##   TalkBackFX pitch shift → low shelf → high shelf → compressor → limiter, sends to Voice
 ## Emits EventBus.talkback_state_changed / mouth_amplitude_changed / mic_permission_changed.
 
 const NOT_READY := &"NOT_READY"
@@ -19,6 +19,13 @@ const FX_BUS := &"TalkBackFX"
 const OUTPUT_BUS := &"Voice"
 ## Capture ring; the default 0.1 s overflows when a frame hitches.
 const CAPTURE_BUFFER_SEC := 1.0
+## The Mic bus filters ahead of the capture, so the detector and the echo both
+## lose hum and rumble below the voice and hiss above it (a toddler's voice is
+## about 250 Hz–5 kHz). Q 0.707 is Butterworth: flat right up to the cutoff.
+const MIC_HIGHPASS_HZ := 120.0
+const MIC_LOWPASS_HZ := 7000.0
+const BUTTERWORTH_Q := 0.707
+const MIC_CAPTURE_FX := 2
 ## 2048-point FFT at 4× overlap: Godot's default, clean on a baby's high voice,
 ## ~35 ms latency, a few % of one core and only while TALK plays.
 const PITCH_FFT := AudioEffectPitchShift.FFT_SIZE_2048
@@ -27,9 +34,30 @@ const PITCH_OVERSAMPLING := 4
 const PITCH_MIN := 1.2
 const PITCH_MAX := 1.8
 const PITCH_JITTER := 0.05
-## Slow ±1.5 % pitch drift so repeats sound alive, not robotic.
-const WOBBLE_DEPTH := 0.015
 const WOBBLE_HZ := 1.3
+## Tone colour shelves on TalkBackFX, after the pitch shift (see PET_ECHO).
+const SHELF_LOW_HZ := 500.0
+const SHELF_HIGH_HZ := 4000.0
+## Echo dynamics after the tone: a gentle 3:1 over −18 dB so shouts don't blast,
+## +6 dB make-up so coos come up, and a −1 dB ceiling. Godot's compressor doubles
+## the dB over threshold, so its ratio 1.5 measures about 3:1 (2 is a brick wall).
+const COMP_THRESHOLD_DB := -18.0
+const COMP_RATIO := 1.5
+const COMP_ATTACK_US := 10000.0
+const COMP_RELEASE_MS := 150.0
+const COMP_MAKEUP_DB := 6.0
+const LIMIT_CEILING_DB := -1.0
+## Each pet's echo. pitch: its share of voice_pitch. resample: how much of the
+## total comes from playing the clip faster (capped at the total). The pitch
+## shifter then works nearer 1.0 and smears less, and the echo comes out a touch
+## quicker. wobble: depth of a slow pitch drift, so repeats sound alive. low_db,
+## high_db: shelf gains for a light tone colour (dog warmer, cat brighter).
+const PET_ECHO := {
+	&"cat": {pitch = 1.0, resample = 1.2, wobble = 0.02, low_db = 0.0, high_db = 2.0},
+	&"dog": {pitch = 0.85, resample = 1.1, wobble = 0.012, low_db = 3.0, high_db = -5.0},
+	&"bunny": {pitch = 1.12, resample = 1.25, wobble = 0.015, low_db = 0.0, high_db = 1.0},
+}
+const DEFAULT_PET := &"cat"
 ## Mic input is dropped during TALK and this long after, so the pet never hears itself.
 ## It is also dropped while a clip is processing and while the settings sheet is
 ## open. While AudioDirector is busy (pet SFX, haptic buzz) the detector is only
@@ -37,11 +65,14 @@ const WOBBLE_HZ := 1.3
 ## Music and loops never gate the mic; AudioDirector ducks them from LISTEN
 ## through CELEBRATE. The recorder stays open during the lullaby.
 const COOLDOWN_SEC := 0.4
-## After the lullaby starts or stops, input is dropped this long, then the room is
-## measured again so the floor includes (or no longer includes) the music.
-const LULLABY_SETTLE_MSEC := 300
+## Settings that change what the room sounds like: the lullaby, the day music and
+## the ambience loops. After one changes, input is dropped this long, then the
+## room is measured again so the floor includes (or no longer includes) it.
+const BACKGROUND_KEYS: Array[StringName] = [&"lullaby_on", &"music_on", &"ambience_on"]
+const BACKGROUND_SETTLE_MSEC := 300
 const CELEBRATE_SEC := 0.6
 ## Silence after each clip so the pitch shifter's FIFO drains before the bus idles.
+## Stream time, so at the fastest resample (1.25) it still lasts 80 ms.
 const TAIL_PAD_SEC := 0.1
 ## Reopen the recorder this long after resume, once Android has unpaused the audio driver.
 const MIC_RESUME_DELAY_MSEC := 250
@@ -67,13 +98,20 @@ var last_clip_sec := 0.0
 ## Speech end → playback start, and the part of it spent processing.
 var last_latency_ms := 0.0
 var last_processing_ms := 0.0
+## Total pitch of the clip playing: resample × pitch shift.
 var current_pitch := 1.0
+## The current pet's share of the voice_pitch setting for the child's echo;
+## set_pet() sets it with the rest of the pet's echo.
+var pet_pitch := 1.0
 ## Capture frames per second over the last second, and watchdog restarts.
 var capture_fps := 0
 var mic_restarts := 0
 
 var _capture: AudioEffectCapture
 var _pitch_fx: AudioEffectPitchShift
+var _low_shelf: AudioEffectFilter
+var _high_shelf: AudioEffectFilter
+var _echo: Dictionary = PET_ECHO[DEFAULT_PET]
 var _mic_player: AudioStreamPlayer
 var _voice_player: AudioStreamPlayer
 var _envelope := PackedFloat32Array()
@@ -91,6 +129,7 @@ var _permission_requested := false
 var _gate_until_msec := 0
 var _talk_time := 0.0
 var _base_pitch := 1.45
+var _pitched := true
 var _celebrate_left := 0.0
 var _babble_stream: AudioStream
 var _babble_envelope: PackedFloat32Array
@@ -128,7 +167,8 @@ func _ready() -> void:
 	EventBus.test_voice_requested.connect(play_babble)
 	EventBus.settings_opened.connect(func() -> void: _sheet_open = true)
 	EventBus.settings_closed.connect(func() -> void: _sheet_open = false)
-	detector.music = bool(Settings.get_value(&"lullaby_on"))
+	detector.music = _music_on()
+	set_pet(DEFAULT_PET)
 	if autostart:
 		start()
 
@@ -162,18 +202,44 @@ func stop() -> void:
 	_set_state(_resting_state())
 
 
-## Plays a clip through the pitch path with mouth sync. Interrupts any clip playing.
-func play_clip(stream: AudioStream, envelope: PackedFloat32Array) -> void:
+## Plays a clip with mouth sync, through the pitch path unless it's already in the
+## pet's own voice. Interrupts any clip playing.
+func play_clip(stream: AudioStream, envelope: PackedFloat32Array, pitched := true) -> void:
 	_drop_pending_clip()
 	_read_input()
 	detector.reset_listening()
 	_envelope = envelope
-	_base_pitch = clampf(float(Settings.get_value(&"voice_pitch")), PITCH_MIN, PITCH_MAX) + randf_range(-PITCH_JITTER, PITCH_JITTER)
+	_pitched = pitched
+	_voice_player.bus = FX_BUS if pitched else OUTPUT_BUS
+	_base_pitch = clampf(float(Settings.get_value(&"voice_pitch")), PITCH_MIN, PITCH_MAX) * pet_pitch \
+			+ randf_range(-PITCH_JITTER, PITCH_JITTER)
 	_talk_time = 0.0
-	_apply_pitch()
+	if pitched:
+		# Never slower than recorded, never faster than the total pitch.
+		_voice_player.pitch_scale = minf(_echo.resample, maxf(_base_pitch, 1.0))
+		_apply_pitch()
+	else:
+		_voice_player.pitch_scale = 1.0
+		current_pitch = 1.0
 	mouth.reset()
 	_play_voice(stream)
 	_set_state(TALK)
+
+
+## Gives the child's echo this pet's character: its pitch share, speed, wobble
+## and tone colour.
+func set_pet(pet_id: StringName) -> void:
+	_echo = PET_ECHO[pet_id]
+	pet_pitch = _echo.pitch
+	# Godot's shelf gain is the gain at the cutoff; the shelf itself gets twice the dB.
+	_low_shelf.gain = db_to_linear(_echo.low_db * 0.5)
+	_high_shelf.gain = db_to_linear(_echo.high_db * 0.5)
+
+
+## Envelope index for what the speaker plays now. The player's position is in
+## stream time, which runs speed× the clock; the output lags it by lag_sec of real time.
+static func envelope_index(stream_pos: float, lag_sec: float, speed: float) -> int:
+	return int((stream_pos - lag_sec * speed) * ClipProcessor.ENVELOPE_RATE)
 
 
 func is_mic_running() -> bool:
@@ -197,10 +263,11 @@ func _process(delta: float) -> void:
 	_pump_mic()
 	if state == TALK:
 		_talk_time += delta
-		_apply_pitch()
-		var pos := _voice_player.get_playback_position() + AudioServer.get_time_since_last_mix() \
-				- AudioServer.get_output_latency() - float(PITCH_FFT_SAMPLES - PITCH_FFT_SAMPLES / PITCH_OVERSAMPLING) / _mix_rate
-		var index := int(pos * ClipProcessor.ENVELOPE_RATE)
+		var lag := AudioServer.get_output_latency() - AudioServer.get_time_since_last_mix()
+		if _pitched:
+			_apply_pitch()
+			lag += float(PITCH_FFT_SAMPLES - PITCH_FFT_SAMPLES / PITCH_OVERSAMPLING) / _mix_rate
+		var index := envelope_index(_voice_player.get_playback_position(), lag, _voice_player.pitch_scale)
 		var env: float = _envelope[index] if index >= 0 and index < _envelope.size() else 0.0
 		EventBus.mouth_amplitude_changed.emit(mouth.update(env, delta))
 	elif state == CELEBRATE:
@@ -242,8 +309,8 @@ func _pump_mic() -> void:
 	if frames > 0:
 		var was_calibrated := detector.is_calibrated()
 		detector.feed_stereo(buffer)
-		# A real mic never gives exact zeros; a closed recorder does.
-		if detector.level > 0.0:
+		# A real mic is never digitally silent; a closed recorder is.
+		if detector.level > VoiceDetector.DIGITAL_SILENCE:
 			_live_msec = now
 			_dead_limit_msec = MIC_DEAD_MSEC
 		if not was_calibrated and detector.is_calibrated() and state == NOT_READY:
@@ -269,7 +336,8 @@ func is_mic_opening() -> bool:
 
 ## The recorder is delivering real signal (not just digital silence).
 func is_mic_live() -> bool:
-	return _mic_running and _device_open and _now() - _live_msec < 300 and detector.level > 0.0
+	return _mic_running and _device_open and _now() - _live_msec < 300 \
+			and detector.level > VoiceDetector.DIGITAL_SILENCE
 
 
 func _on_speech_started() -> void:
@@ -283,13 +351,16 @@ func _on_speech_finished(clip: PackedFloat32Array) -> void:
 	_trailing_ms = detector.trailing_quiet_sec * 1000.0
 	_clip_token += 1
 	_processing = true
-	_start_clip_job(_clip_token, clip, _mix_rate)
+	# The floor is frozen while recording (a forced stop lifts it to the clip's
+	# quietest window), so this is the room the clip was heard in.
+	_start_clip_job(_clip_token, clip, _mix_rate, detector.noise_floor)
 
 
 ## Pure and thread-safe: cleaned stream + envelope, or {} if nothing is left.
-static func build_clip(clip: PackedFloat32Array, rate: int) -> Dictionary:
+## noise_floor (the detector's, at capture) lets the noise gate find the room noise.
+static func build_clip(clip: PackedFloat32Array, rate: int, noise_floor := 0.0) -> Dictionary:
 	var t0 := Time.get_ticks_usec()
-	var cleaned := ClipProcessor.process(clip, rate)
+	var cleaned := ClipProcessor.process(clip, rate, noise_floor)
 	if cleaned.is_empty():
 		return {}
 	return {
@@ -352,9 +423,11 @@ func _stop_playback() -> void:
 		_end_talk()
 
 
+## The wobble rides on the pitch shifter only; the resample rate stays fixed per
+## clip, so playback timing stays predictable.
 func _apply_pitch() -> void:
-	current_pitch = _base_pitch * (1.0 + WOBBLE_DEPTH * sin(TAU * WOBBLE_HZ * _talk_time))
-	_pitch_fx.pitch_scale = current_pitch
+	current_pitch = _base_pitch * (1.0 + _echo.wobble * sin(TAU * WOBBLE_HZ * _talk_time))
+	_pitch_fx.pitch_scale = current_pitch / _voice_player.pitch_scale
 
 
 func _resting_state() -> StringName:
@@ -429,9 +502,9 @@ func _stop_mic() -> void:
 # Device, input, clock and permission seams; tests override these. -------------
 
 ## Runs build_clip off the main thread and hands the result to _on_clip_ready.
-func _start_clip_job(token: int, clip: PackedFloat32Array, rate: int) -> void:
+func _start_clip_job(token: int, clip: PackedFloat32Array, rate: int, noise_floor: float) -> void:
 	_tasks.append(WorkerThreadPool.add_task(func() -> void:
-		_on_clip_ready.call_deferred(token, build_clip(clip, rate)), false, "TalkBack clip"))
+		_on_clip_ready.call_deferred(token, build_clip(clip, rate, noise_floor)), false, "TalkBack clip"))
 
 
 func _open_device() -> Error:
@@ -523,12 +596,14 @@ func _on_app_resumed() -> void:
 
 
 func _on_settings_changed(key: StringName, value: Variant) -> void:
-	if key == &"lullaby_on":
-		# The mic stays open over the music. Skip input while it starts or stops,
-		# then measure the room again with (or without) it.
-		detector.music = bool(value)
+	if key in BACKGROUND_KEYS:
+		# The mic stays open over music and ambience. Skip input while they start
+		# or stop, then measure the room again with (or without) them. Ambience
+		# is steady with soft transients, so it needs no music mode: the
+		# detector's start rules already reject clock ticks and birdsong.
+		detector.music = _music_on()
 		_drop_pending_clip()
-		_gate_until_msec = maxi(_gate_until_msec, _now() + LULLABY_SETTLE_MSEC)
+		_gate_until_msec = maxi(_gate_until_msec, _now() + BACKGROUND_SETTLE_MSEC)
 		detector.recalibrate()
 		if state != TALK and state != CELEBRATE:
 			_set_state(_resting_state())
@@ -545,21 +620,50 @@ func _on_settings_changed(key: StringName, value: Variant) -> void:
 	_set_state(_resting_state())
 
 
+## The lullaby or the day music is playing. A setting with no default yet reads as off.
+func _music_on() -> bool:
+	return Settings.get_value(&"lullaby_on") == true or Settings.get_value(&"music_on") == true
+
+
 func _setup_buses() -> void:
 	var mic := _ensure_bus(MIC_BUS, &"Master")
 	AudioServer.set_bus_mute(mic, true)
 	if AudioServer.get_bus_effect_count(mic) == 0:
+		# Effects run in order, so the capture gets the filtered signal.
+		AudioServer.add_bus_effect(mic, _filter(AudioEffectHighPassFilter.new(), MIC_HIGHPASS_HZ, BUTTERWORTH_Q))
+		AudioServer.add_bus_effect(mic, _filter(AudioEffectLowPassFilter.new(), MIC_LOWPASS_HZ, BUTTERWORTH_Q))
 		var capture := AudioEffectCapture.new()
 		capture.buffer_length = CAPTURE_BUFFER_SEC
 		AudioServer.add_bus_effect(mic, capture)
-	_capture = AudioServer.get_bus_effect(mic, 0) as AudioEffectCapture
+	_capture = AudioServer.get_bus_effect(mic, MIC_CAPTURE_FX) as AudioEffectCapture
 	var fx := _ensure_bus(FX_BUS, OUTPUT_BUS)
 	if AudioServer.get_bus_effect_count(fx) == 0:
 		var shift := AudioEffectPitchShift.new()
 		shift.fft_size = PITCH_FFT
 		shift.oversampling = PITCH_OVERSAMPLING
 		AudioServer.add_bus_effect(fx, shift)
+		AudioServer.add_bus_effect(fx, _filter(AudioEffectLowShelfFilter.new(), SHELF_LOW_HZ))
+		AudioServer.add_bus_effect(fx, _filter(AudioEffectHighShelfFilter.new(), SHELF_HIGH_HZ))
+		var comp := AudioEffectCompressor.new()
+		comp.threshold = COMP_THRESHOLD_DB
+		comp.ratio = COMP_RATIO
+		comp.attack_us = COMP_ATTACK_US
+		comp.release_ms = COMP_RELEASE_MS
+		comp.gain = COMP_MAKEUP_DB
+		AudioServer.add_bus_effect(fx, comp)
+		var limiter := AudioEffectHardLimiter.new()
+		limiter.ceiling_db = LIMIT_CEILING_DB
+		AudioServer.add_bus_effect(fx, limiter)
 	_pitch_fx = AudioServer.get_bus_effect(fx, 0) as AudioEffectPitchShift
+	_low_shelf = AudioServer.get_bus_effect(fx, 1) as AudioEffectFilter
+	_high_shelf = AudioServer.get_bus_effect(fx, 2) as AudioEffectFilter
+
+
+## resonance 0.5 (Godot's default) gives shelves without overshoot.
+func _filter(filter: AudioEffectFilter, cutoff_hz: float, resonance := 0.5) -> AudioEffectFilter:
+	filter.cutoff_hz = cutoff_hz
+	filter.resonance = resonance
+	return filter
 
 
 func _ensure_bus(bus: StringName, send: StringName) -> int:

@@ -3,10 +3,14 @@ extends Node
 
 const PATH := "user://settings.cfg"
 const SECTION := "settings"
+## Talk-back treats lullaby_on or music_on as "music playing" for its detector.
 const DEFAULTS := {
 	&"lullaby_on": false,
 	&"voice_pitch": 1.45,
 	&"talkback_on": true,
+	&"music_on": false,
+	&"ambience_on": true,
+	&"quiet_mode": false,
 }
 
 var _config := ConfigFile.new()

@@ -7,6 +7,8 @@ extends Node3D
 
 ## Nobody has touched the pet for a while and it waved; the stage adds the greeting.
 signal called_to_play
+## An idle break started with this clip; the stage may add a line (a yawn at night).
+signal idle_break(clip: StringName)
 
 const ZONE_LAYER := 1 << 4
 const TOON_SHADER := preload("res://shaders/toon.gdshader")
@@ -15,10 +17,13 @@ const BLOB_SHADER := preload("res://shaders/blob_shadow.gdshader")
 ## Thin shells (belly, eyes, cheeks...) sit on top of these and must not get a hull.
 const OUTLINED: Array[String] = ["body", "ear", "paw", "collar", "collar_tag", "tail_puff"]
 
-## The tongue shell sits almost on the mouth shell and would z-fight.
-const TONGUE_BIAS := 0.012
+## The 3D tongue sits in the mouth; any pull toward the camera draws it over the lower lip.
+const TONGUE_BIAS := 0.0
 const IDLE := PetClips.IDLE
 const WALK := PetClips.WALK
+const RUN := &"run"
+## walk_in played this much faster stands in for a missing run loop.
+const RUN_STAND_IN_SPEED := 1.8
 ## Turned a little toward screen-left for the 3/4 view.
 const FACING_YAW := -0.38
 const BLINK_SEC := 0.15
@@ -31,6 +36,7 @@ const NOSE_SEC := 0.25
 const COME_PLAY_LOOK_SEC := 2.5
 ## The dog's floppy ears stick straight out at full ear_perk; a lift reads better.
 const DOG_PERK_SCALE := 0.4
+const SURPRISE_SQUASH := 0.12
 
 var pet_id: StringName
 ## Mouth opening from talk-back playback, 0..1.
@@ -52,6 +58,7 @@ var _belly_offset := Vector3.ZERO
 var _zone_centers := {}
 var _bounds := AABB()
 var _mouth_bone: Node3D
+var _hold_bone: Node3D
 var _mouth_local := Vector3.ZERO
 
 var _shape_jaw := -1
@@ -74,6 +81,10 @@ var _rest_perk := 0.0
 var _pulse_perk_left := 0.0
 var _nose_t := -1.0
 var _nose_twitches := 2
+## Face keys this frame (jaw, blink L, smile, perk, nose, blink R), matching
+## _face_shapes; clips that animate the face may only raise them.
+var _face := PackedFloat32Array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+var _face_shapes := PackedInt32Array()
 
 var _blink_left := 3.6
 var _blink_t := -1.0
@@ -85,7 +96,12 @@ var _nod_left := 0.0
 var _idle := PetIdle.new()
 var _idle_breaks: Array = []
 var _pickers := {}
+var _surprises := NoRepeatPicker.new(PetSounds.SURPRISES.size())
 var _rng := RandomNumberGenerator.new()
+## The clip's timed body sounds (PetSounds.CLIPS); a new clip drops the rest.
+var _cue_tween: Tween
+## The run patter plays until the run clip gives way.
+var _running := false
 
 
 func _init(id: StringName = &"cat") -> void:
@@ -109,13 +125,15 @@ func _ready() -> void:
 
 # Public ----------------------------------------------------------------------
 
-## Plays one variant (picked without repeats) from a list of clip sequences.
-func play_variant(key: StringName, variants: Array) -> void:
+## Plays one variant (picked without repeats) from a list of clip sequences; returns it.
+func play_variant(key: StringName, variants: Array) -> Array:
 	if variants.is_empty():
-		return
+		return []
 	if not _pickers.has(key):
 		_pickers[key] = NoRepeatPicker.new(variants.size())
-	play_sequence(variants[(_pickers[key] as NoRepeatPicker).pick()])
+	var clips: Array = variants[(_pickers[key] as NoRepeatPicker).pick()]
+	play_sequence(clips)
+	return clips
 
 
 func play_sequence(clips: Array) -> void:
@@ -123,10 +141,25 @@ func play_sequence(clips: Array) -> void:
 		_play(clips)
 
 
-## Plays a toy action, or `stand_in` while this GLB lacks it, even while acting.
+## Plays a toy action, or `stand_in` while this GLB lacks it, even while acting,
+## then holds `rest` (sit_idle...) instead of idle if the GLB has it.
 ## Returns its length, 0 if neither exists.
-func play_toy_clip(clip: StringName, stand_in: StringName) -> float:
-	return _play([clip if _player.has_animation(clip) else stand_in])
+func play_toy_clip(clip: StringName, stand_in: StringName, rest: StringName = &"") -> float:
+	var length := _play([clip if _player.has_animation(clip) else stand_in])
+	if _player.has_animation(rest):
+		_player.clear_queue()
+		_player.queue(rest)
+	return length
+
+
+## The run loop for a chase (walk_in, faster, while this GLB lacks it); the caller moves the pet.
+## The run patter plays until the next clip starts.
+func play_run() -> void:
+	var real := _player.has_animation(RUN)
+	_player.clear_queue()
+	_player.play(RUN if real else WALK, PetClips.REACT_BLEND_SEC, 1.0 if real else RUN_STAND_IN_SPEED)
+	_running = true
+	AudioDirector.start_sfx(PetSounds.RUN)
 
 
 func is_busy() -> bool:
@@ -240,6 +273,16 @@ func mouth_point() -> Vector3:
 	return _mouth_bone.global_transform * _mouth_local
 
 
+## Whether the GLB has the `hold` bone between the paws.
+func has_hold() -> bool:
+	return _hold_bone != null
+
+
+## World position of the paws' hold bone as posed right now.
+func hold_point() -> Vector3:
+	return _hold_bone.global_position
+
+
 ## World-space point between the eyes, at rest; the zoom camera aims here.
 func face_point() -> Vector3:
 	return global_transform * _face_offset
@@ -292,13 +335,48 @@ func _update_timers(delta: float) -> void:
 		return
 	match _idle.update(delta, _busy_left <= 0.0 and not _talking):
 		PetIdle.Event.BREAK:
-			if not _idle_breaks.is_empty():
-				play_variant(&"idle_break", _idle_breaks)
+			if not acting and not _idle_breaks.is_empty():
+				var clips := play_variant(&"idle_break", _idle_breaks)
 				_blink_left = 0.3
+				idle_break.emit(clips[0])
 		PetIdle.Event.COME_PLAY:
 			look.focus(COME_PLAY_LOOK_SEC)
 			play_sequence([&"wave"])
 			called_to_play.emit()
+	if _idle.surprise(delta, _busy_left <= 0.0 and not _talking and not acting):
+		_surprise()
+
+
+## A sneeze (with a nose twitch) or a hiccup: its sound and a little squash.
+func _surprise() -> void:
+	var sound := PetSounds.SURPRISES[_surprises.pick()]
+	AudioDirector.play_sfx(sound)
+	bounce.squash(SURPRISE_SQUASH)
+	if sound == &"sneeze":
+		twitch_nose(3)
+	_idle.delay_break()
+
+
+## Plays the clip's timed body sounds, and ends the run patter once the run gives way.
+func _on_clip_started(clip: StringName) -> void:
+	if _cue_tween:
+		_cue_tween.kill()
+		_cue_tween = null
+	if _running and clip != RUN:
+		_running = false
+		AudioDirector.stop_sfx(PetSounds.RUN)
+	var cues: Array = PetSounds.CLIPS.get(_clips.base_of(clip), [])
+	if cues.is_empty():
+		return
+	_cue_tween = create_tween()
+	var at := 0.0
+	for cue: Array in cues:
+		var sound := PetSounds.pick(cue[1], pet_id)
+		if sound == &"":
+			continue
+		_cue_tween.tween_interval(cue[0] - at)
+		_cue_tween.tween_callback(AudioDirector.play_sfx.bind(sound))
+		at = cue[0]
 
 
 func _update_face(delta: float) -> void:
@@ -312,20 +390,33 @@ func _update_face(delta: float) -> void:
 	var jaw := jaw_talk
 	if _chomp_left > 0.0:
 		jaw = maxf(jaw, 0.55 * absf(sin(_chomp_left * TAU * 1.67)))
-	_head.set_blend_shape_value(_shape_jaw, jaw)
-	_head.set_blend_shape_value(_shape_blink_l, eyes)
-	_head.set_blend_shape_value(_shape_blink_r, eyes)
-	_head.set_blend_shape_value(_shape_smile, _smile)
-	_head.set_blend_shape_value(_shape_perk, _perk * _perk_scale)
 	look.talk = jaw_talk
-	if _shape_nose >= 0:
-		var nose := 0.0
-		if _nose_t >= 0.0:
-			_nose_t += delta
-			nose = absf(sin(PI * _nose_twitches * minf(_nose_t / NOSE_SEC, 1.0)))
-			if _nose_t >= NOSE_SEC:
-				_nose_t = -1.0
-		_head.set_blend_shape_value(_shape_nose, nose)
+	var nose := 0.0
+	if _nose_t >= 0.0:
+		_nose_t += delta
+		nose = absf(sin(PI * _nose_twitches * minf(_nose_t / NOSE_SEC, 1.0)))
+		if _nose_t >= NOSE_SEC:
+			_nose_t = -1.0
+	_face[0] = jaw
+	_face[1] = eyes
+	_face[2] = _smile
+	_face[3] = _perk * _perk_scale
+	_face[4] = nose
+	_face[5] = eyes
+	# Zeroed before the AnimationPlayer runs (it's our child, so it processes
+	# after us); keys a clip doesn't animate then come back from _face alone.
+	for i in _face_shapes.size():
+		if _face_shapes[i] >= 0:
+			_head.set_blend_shape_value(_face_shapes[i], 0.0)
+
+
+## The clip has written its face keys; ours win wherever they are larger, so talk,
+## blinks, moods and ear perks keep showing through yawns and scratches.
+func _on_mixer_applied() -> void:
+	for i in _face_shapes.size():
+		var shape := _face_shapes[i]
+		if shape >= 0:
+			_head.set_blend_shape_value(shape, maxf(_head.get_blend_shape_value(shape), _face[i]))
 
 
 func _play(clips: Array) -> float:
@@ -371,8 +462,11 @@ func _load_model() -> void:
 	_shape_blink_r = _head.find_blend_shape_by_name(&"blink_R")
 	_shape_smile = _head.find_blend_shape_by_name(&"smile")
 	_shape_perk = _head.find_blend_shape_by_name(&"ear_perk")
-	if pet_id == &"bunny":
-		_shape_nose = _head.find_blend_shape_by_name(&"nose_twitch")
+	_shape_nose = _head.find_blend_shape_by_name(&"nose_twitch")
+	_face_shapes = PackedInt32Array([_shape_jaw, _shape_blink_l, _shape_smile, _shape_perk, _shape_nose, _shape_blink_r])
+	_player.mixer_applied.connect(_on_mixer_applied)
+	# Also fires for queued clips, so every clip of a sequence gets its sounds.
+	_player.animation_started.connect(_on_clip_started)
 	var body: MeshInstance3D = _skeleton.get_node("%s_body" % id)
 	_apply_materials(_head)
 	_apply_materials(body)
@@ -382,6 +476,11 @@ func _load_model() -> void:
 	_bounds = _head.get_aabb().merge(body.get_aabb())
 	_build_motion()
 	_build_droop()
+	if _skeleton.find_bone("hold") >= 0:
+		var attachment := BoneAttachment3D.new()
+		attachment.bone_name = "hold"
+		_skeleton.add_child(attachment)
+		_hold_bone = attachment
 
 
 func _apply_materials(mesh_instance: MeshInstance3D) -> void:
@@ -396,7 +495,7 @@ func _apply_materials(mesh_instance: MeshInstance3D) -> void:
 			"eye_highlight":
 				material.set_shader_parameter(&"self_light", 1.0)
 				material.set_shader_parameter(&"rim_strength", 0.0)
-			"eye", "mouth_inner":
+			"eye", "mouth_inner", "mouth_deep":
 				material.set_shader_parameter(&"self_light", 0.15)
 				material.set_shader_parameter(&"rim_strength", 0.0)
 			"tongue":

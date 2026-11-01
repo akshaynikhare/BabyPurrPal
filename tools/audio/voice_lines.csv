@@ -1,0 +1,18 @@
+id,text,speed,tried,note
+laugh_1,Ha! Ha! Ha! Ha! Ha!,1.0,"Ha ha ha ha ha!@1.0; Ha ha ha ha ha!@1.15; Ha-ha-ha-ha-ha!@1.15; Ha ha ha ha ha@1.25; Hahahahaha!@1.15; Ha! Ha! Ha! Ha! Ha!@1.25; Ha, ha, ha, ha, ha!@1.2; Ha, ha, ha, ha, ha!@1.0",laugh rhythm: 5 peaks at 4.8 Hz; the plain and hyphen spellings run 5.6-6.9 Hz or merge into 3 peaks
+laugh_2,Hee! Hee! Hee! Hee!,1.25,Hee hee hee hee!@1.0; Hee hee hee hee!@1.2; Hee-hee-hee-hee!@1.15; Hee hee hee hee@1.25,"laugh rhythm: 4 peaks at 5.0 Hz; spaced spellings 5.9 Hz, hyphens 6.7 Hz"
+laugh_3,Ha ha! Hee hee hee!,1.0,"Ha ha! Hee hee hee!@1.2; Ha-ha! Hee-hee-hee!@1.15; Ha ha, hee hee hee!@1.25",laugh rhythm: 5 peaks at 5.4 Hz; faster takes 5.9-7.7 Hz
+laugh_4,Heh heh heh heh heh!,1.0,Heh heh heh heh heh!@1.2; Heh-heh-heh-heh-heh!@1.15; Heh heh heh heh heh@1.25,laugh rhythm: 5 peaks at 5.1 Hz; hyphens 8 Hz with a 190 ms vowel
+giggle_1,Hee hee!,1.0,Hee hee!@1.25; Hee-hee!@1.15; Hee hee@1.2,laugh rhythm: 2 peaks at 5.3 Hz; 1.25 and hyphens run 6.2-8.3 Hz
+giggle_2,Tee hee hee!,1.0,Tee hee hee!@1.25; Tee-hee-hee!@1.15; Teehee hee!@1.2,laugh rhythm: 3 peaks at 5.7 Hz; other takes 6.9-9.1 Hz
+giggle_3,Hi! Hi! Hi!,1.0,"Hi hi hi!@1.0; Hi hi hi!@1.25; Hi-hi-hi!@1.15; Hihihi!@1.2; Hi, hi, hi!@1.0","laugh rhythm: 3 peaks at 4.3 Hz; ""Hi hi hi!"" 6.1-6.7 Hz"
+squeal_1,[Whee](/wˈiii/)!,1.0,Whee!@1.0; Wheee!@1.0; Whee!@1.2; Wheeee!@1.1,single burst: phoneme markup holds the vowel (0.57 s); extra e letters are ignored by Kokoro (0.46 s)
+squeal_2,Yaaay!,1.0,Yay!@1.0; Yay!@1.2; Yay@1.1; [Yay](/jˈAA/)!@1.0,"single burst, 200 ms held vowel; ""[Yay](/jˈAA/)"" may read as two yays"
+yum_1,"Mmm, yummy!",1.0,"Mmm, yummy!@1.15; Mmm! Yummy!@1.1; Mm, yummy!@1.2",two clean parts (hum + word); faster takes clip the hum
+yum_2,Mmm mmm!,1.0,Mmm-mmm!@1.0; Mm mm!@1.15; Mmm mmm@1.2,only take with two separate hums (2 peaks)
+ahh,Ahh!,1.0,Ahhh!@1.0; Ah!@1.1; Aah!@1.0,"single burst, 230 ms held vowel"
+ooh,Oooh!,1.0,Ooh!@1.0; Ooh@1.1; Ohh!@1.0,"single burst, longest held vowel (260 ms) for wonder"
+hooray,Hoo-ray!,1.1,Hooray!@1.0; Hooray!@1.15; Hurray!@1.1,"two clear beats (2 peaks); ""Hooray!"" reads as one burst"
+wow,Wooow!,1.0,Wow!@1.0; Wow!@1.15; Wow@1.1,"single burst, held vowel (270 ms); ""Wow!"" is clipped (130 ms)"
+hello_1,Hi there!,1.0,"Hi there!@1.15; Hi, there!@1.1","two words, 0.61 s; alternatives near-identical"
+hello_2,Hello!,1.0,Hello!@1.15; Hellooo!@1.0; Hel-lo!@1.1,"single burst; ""Hellooo!"" and ""Hel-lo!"" add a second bump"

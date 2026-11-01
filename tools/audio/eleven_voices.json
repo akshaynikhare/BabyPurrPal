@@ -1,0 +1,17 @@
+{
+ "cat": {
+  "voice_id": "1fyQAmbxvWoOL9SQQFCa",
+  "model": "eleven_ttv_v3",
+  "description": "Native English. A cute cartoon kitten character with a high, bright, sweet voice. Studio-quality recording. Playful, a little mischievous and bursting with joy. Light, sparkly tone with quick bubbly giggles and a soft purring warmth; speaks at a lively, bouncy pace."
+ },
+ "dog": {
+  "voice_id": "OppHQ7Pr9CQBPNnAAuHE",
+  "model": "eleven_ttv_v3",
+  "description": "Native English. A goofy, lovable cartoon puppy character with a warm, mid-pitched, slightly husky male voice. Studio-quality recording. Bouncy, eager and over-excited, a little breathless as if wagging his whole body. Big hearty belly laughs, friendly and silly; speaks fast with lots of enthusiasm."
+ },
+ "bunny": {
+  "voice_id": "ZmMAh2hRJmwjuRp4Nk7S",
+  "model": "eleven_ttv_v3",
+  "description": "Native English. A small, hyper cartoon bunny character with a male voice that is higher-pitched than most men, punchy and a little raspy. Studio-quality recording. A fast-talking, wisecracking comic, loud and over-the-top animated; his voice jumps up and cracks into squeaks when he gets excited. Explosive cackling laughs; rapid, staccato delivery with big dramatic emphasis."
+ }
+}

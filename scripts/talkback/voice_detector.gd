@@ -12,6 +12,11 @@ signal too_short(duration_sec: float)
 
 enum Phase { CALIBRATING, IDLE, RECORDING }
 
+## Windows quieter than this (−120 dBFS) are digital silence: a closed recorder.
+## Not exact zero, because the Mic bus filters ring on in tiny values after input
+## stops; a real mic's own noise is far louder (16-bit LSB ≈ −90 dBFS).
+const DIGITAL_SILENCE := 0.000001
+
 # Tunables. Defaults target a toddler's coos/babble at arm's length from a phone mic.
 ## Analysis window; 20 ms is short enough to catch syllable onsets.
 var window_sec := 0.02
@@ -30,6 +35,12 @@ var min_stop_level := 0.005
 var min_floor := 0.001
 ## Level must stay above the start threshold this long before recording starts.
 var start_sustain_sec := 0.1
+## A start also needs a voice-like sound. At the end of the sustain span the level
+## must be within this of the span's loudest window; a clock tick or a knock has
+## rung out by then.
+var onset_max_drop_db := 6.0
+## And it must be centred below this frequency; birdsong and crickets sit higher.
+var voice_max_hz := 3000.0
 ## Audio kept from before the start so soft onsets ("b", "m") aren't clipped.
 var pre_roll_sec := 0.3
 ## Quiet this long ends the utterance.
@@ -78,6 +89,10 @@ var _ring_pos := 0
 var _ring_filled := 0
 var _candidate_windows := 0
 var _sustain_windows := 5
+## Candidate levels over the last sustain span, and the start rules in ratio form.
+var _onset_levels: PackedFloat32Array = []
+var _onset_hold := 0.5
+var _max_brightness := 0.18
 
 var _record: PackedFloat32Array = []
 var _record_count := 0
@@ -97,6 +112,10 @@ func configure(sample_rate: int) -> void:
 	_rate = sample_rate
 	_window = maxi(1, roundi(window_sec * _rate))
 	_sustain_windows = maxi(1, ceili(start_sustain_sec / window_sec))
+	_onset_levels.resize(_sustain_windows)
+	_onset_hold = db_to_linear(-onset_max_drop_db)
+	# First-difference energy over energy is 4·sin²(π·f/rate) for a tone at f.
+	_max_brightness = 4.0 * pow(sin(PI * minf(voice_max_hz / _rate, 0.5)), 2.0)
 	_ring.resize(roundi(pre_roll_sec * _rate) + _sustain_windows * _window)
 	_record.resize(roundi(max_clip_sec * _rate))
 	recalibrate()
@@ -183,8 +202,8 @@ func _push(s: float) -> void:
 func _on_window(rms: float) -> void:
 	match phase:
 		Phase.CALIBRATING:
-			# Exact zeros mean the recorder isn't delivering yet, not a silent room.
-			if rms == 0.0:
+			# Digital silence means the recorder isn't delivering yet, not a silent room.
+			if rms < DIGITAL_SILENCE:
 				return
 			_calib_levels.append(rms)
 			if _calib_levels.size() >= _calib_target:
@@ -195,9 +214,10 @@ func _on_window(rms: float) -> void:
 				noise_floor = maxf(_calib_levels[mini(int(_calib_levels.size() * pct), _calib_levels.size() - 1)], min_floor)
 				phase = Phase.IDLE
 		Phase.IDLE:
-			if rms > start_threshold():
+			if rms > start_threshold() and _sounds_low(rms):
+				_onset_levels[_candidate_windows % _sustain_windows] = rms
 				_candidate_windows += 1
-				if _candidate_windows >= _sustain_windows:
+				if _candidate_windows >= _sustain_windows and _onset_holds(rms):
 					_begin_recording()
 			else:
 				_candidate_windows = 0
@@ -214,6 +234,30 @@ func _on_window(rms: float) -> void:
 				_finish(false)
 			elif _record_count >= _record.size():
 				_finish(true)
+
+
+## Still near the loudest window of the sustain span: a voice holds there, a tick
+## or knock has already rung out.
+func _onset_holds(rms: float) -> bool:
+	var top := 0.0
+	for v in _onset_levels:
+		top = maxf(top, v)
+	return rms >= top * _onset_hold
+
+
+## The window just finished (still in the ring) is centred below voice_max_hz.
+## Only run for loud windows, so a quiet room costs nothing.
+func _sounds_low(rms: float) -> bool:
+	var size := _ring.size()
+	var i := (_ring_pos - _window + size) % size
+	var prev := _ring[(i - 1 + size) % size]
+	var diff := 0.0
+	for k in _window:
+		var s := _ring[i]
+		diff += (s - prev) * (s - prev)
+		prev = s
+		i = (i + 1) % size
+	return diff <= rms * rms * _window * _max_brightness
 
 
 func _track_floor(rms: float) -> void:
